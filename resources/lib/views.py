@@ -1,0 +1,472 @@
+"""Every listing the addon can produce.
+
+Views are registered by `@route` and receive the per-invocation `Request`. They
+either emit a directory through `request.add_items` or, for the RunPlugin
+actions, perform a side effect and return without touching the handle.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+import xbmc
+import xbmcgui
+import xbmcplugin
+
+from api import parse_datetime
+from kodiutils import localise, log, notify, open_settings
+from listing import (
+    asset_label,
+    folder_item,
+    format_month,
+    menu_item,
+    photo_item,
+    video_item,
+)
+from router import route
+
+# Registered before the items, first entry wins as the listing default.
+PHOTO_SORTS = (
+    xbmcplugin.SORT_METHOD_NONE,
+    xbmcplugin.SORT_METHOD_DATE_TAKEN,
+    xbmcplugin.SORT_METHOD_LABEL,
+)
+FOLDER_SORTS = (
+    xbmcplugin.SORT_METHOD_NONE,
+    xbmcplugin.SORT_METHOD_LABEL,
+    xbmcplugin.SORT_METHOD_DATE,
+)
+
+
+# ---------------------------------------------------------------- root menu
+
+
+def _slideshow_menu(request, target_url: str) -> list:
+    """Context menu entry that plays a listing as a slideshow."""
+    return [
+        (
+            localise(30049),
+            f"RunPlugin({request.url(action='slideshow', target=target_url)})",
+        )
+    ]
+
+
+@route("")
+def root(request):
+    features = request.client.features(request.cache)
+
+    # (label, icon, help, params, offer a slideshow). Slideshow is only offered
+    # where the target resolves to media without prompting: running it on the
+    # search entry would pop an input dialog inside the slideshow window.
+    entries = [
+        (30002, "timeline", 30071, {"action": "timeline"}, True),
+        (30015, "videos", 30073, {"action": "timeline", "video": "1"}, False),
+        (30003, "albums", 30074, {"action": "albums"}, True),
+        (30052, "favourites", 30075, {"action": "favourites"}, True),
+    ]
+    if features.get("facialRecognition", True):
+        entries.append((30053, "people", 30076, {"action": "people"}, True))
+    entries.extend(
+        [
+            (30054, "places", 30077, {"action": "places"}, True),
+            (30055, "tags", 30078, {"action": "tags"}, True),
+            (30056, "memories", 30079, {"action": "memories"}, True),
+            (30057, "search", 30080, {"action": "search"}, False),
+            (30058, "random", 30081, {"action": "random"}, True),
+        ]
+    )
+
+    items = []
+    for label_id, icon, help_id, params, sliddable in entries:
+        url = request.url(**params)
+        item = menu_item(localise(label_id), icon, localise(help_id))
+        if sliddable:
+            item.addContextMenuItems(_slideshow_menu(request, url))
+        items.append((url, item, True))
+
+    items.append(
+        (
+            request.url(action="settings"),
+            menu_item(localise(30059), "settings", localise(30082), is_folder=False),
+            False,
+        )
+    )
+
+    request.add_items(items, content="files")
+
+
+# ------------------------------------------------------------------ timeline
+
+
+def _timeline_filters(request) -> dict:
+    """Filters shared by the month list and the assets inside a month."""
+    return {
+        "personId": request.param("personId"),
+        "tagId": request.param("tagId"),
+        "albumId": request.param("albumId"),
+        "isFavorite": request.param("favorite") == "1",
+        "withPartners": request.settings.include_partners,
+        "visibility": "timeline",
+    }
+
+
+def _passthrough(request) -> dict:
+    """The subset of params a child listing must inherit."""
+    keep = {}
+    for name in ("video", "personId", "tagId", "albumId", "favorite"):
+        value = request.param(name)
+        if value:
+            keep[name] = value
+    return keep
+
+
+@route("timeline")
+def timeline(request):
+    buckets = request.client.timeline_buckets(**_timeline_filters(request))
+    inherited = _passthrough(request)
+
+    items = []
+    for bucket in buckets:
+        when = parse_datetime(bucket.get("timeBucket"))
+        if when is None:
+            continue
+        url = request.url(action="bucket", id=bucket["timeBucket"], **inherited)
+        label = format_month(when)
+        item = folder_item(
+            label,
+            icon_name="timeline",
+            date=when,
+            label2=localise(30085) % bucket.get("count", 0),
+        )
+        item.addContextMenuItems(_slideshow_menu(request, url))
+        items.append((url, item, True))
+
+    category = request.param("title") or localise(30002)
+    request.add_items(items, content="files", category=category, sort=(xbmcplugin.SORT_METHOD_NONE,))
+
+
+@route("bucket")
+def bucket(request):
+    assets = request.client.timeline_bucket(
+        request.param("id"), **_timeline_filters(request)
+    )
+    when = parse_datetime(request.param("id"))
+    _emit_assets(
+        request,
+        assets,
+        category=format_month(when) if when else request.param("id", ""),
+        timeline_filters=True,
+    )
+
+
+# -------------------------------------------------------------------- albums
+
+
+@route("albums")
+def albums(request):
+    entries = request.client.albums(shared_only=request.settings.shared_only)
+
+    items = []
+    for album in entries:
+        if not album.get("id"):
+            continue
+        url = request.url(action="album", id=album["id"], title=album.get("albumName", ""))
+        thumbnail = album.get("albumThumbnailAssetId")
+        item = folder_item(
+            album.get("albumName") or localise(30003),
+            thumb=request.client.thumbnail_url(thumbnail) if thumbnail else None,
+            icon_name="albums",
+            date=parse_datetime(album.get("startDate")),
+            label2=localise(30085) % album.get("assetCount", 0),
+        )
+        item.addContextMenuItems(_slideshow_menu(request, url))
+        items.append((url, item, True))
+
+    request.add_items(items, content="files", category=localise(30003), sort=FOLDER_SORTS)
+
+
+@route("album")
+def album(request):
+    assets = request.client.album_assets(request.param("id"))
+    _emit_assets(request, assets, category=request.param("title", ""))
+
+
+# ---------------------------------------------------------------- favourites
+
+
+@route("favourites")
+def favourites(request):
+    request.params["favorite"] = "1"
+    request.params["title"] = localise(30052)
+    timeline(request)
+
+
+# -------------------------------------------------------------------- people
+
+
+@route("people")
+def people(request):
+    data = request.client.people()
+    items = []
+    for person in data.get("people") or []:
+        if person.get("isHidden"):
+            continue
+        name = person.get("name") or ""
+        if not name:
+            continue
+        url = request.url(action="timeline", personId=person["id"], title=name)
+        item = folder_item(
+            name,
+            thumb=request.client.person_thumbnail_url(person["id"]),
+            icon_name="people",
+        )
+        items.append((url, item, True))
+
+    request.add_items(items, content="files", category=localise(30053), sort=FOLDER_SORTS)
+
+
+# -------------------------------------------------------------------- places
+
+
+@route("places")
+def places(request):
+    representatives = request.client.cities()
+    items = []
+    seen = set()
+    for asset in representatives:
+        city = asset.city
+        if not city or city in seen:
+            continue
+        seen.add(city)
+        url = request.url(action="place", city=city, title=city)
+        item = folder_item(
+            city,
+            thumb=request.client.thumbnail_url(asset.id),
+            icon_name="places",
+            label2=asset.country or "",
+        )
+        items.append((url, item, True))
+
+    request.add_items(items, content="files", category=localise(30054), sort=FOLDER_SORTS)
+
+
+@route("place")
+def place(request):
+    assets = request.client.search_metadata(city=request.param("city"))
+    _emit_assets(request, assets, category=request.param("title", ""))
+
+
+# ---------------------------------------------------------------------- tags
+
+
+@route("tags")
+def tags(request):
+    items = []
+    for tag in request.client.tags():
+        label = tag.get("value") or tag.get("name") or ""
+        if not label:
+            continue
+        url = request.url(action="timeline", tagId=tag["id"], title=label)
+        items.append((url, folder_item(label, icon_name="tags"), True))
+
+    request.add_items(items, content="files", category=localise(30055), sort=FOLDER_SORTS)
+
+
+# ------------------------------------------------------------------ memories
+
+
+@route("memories")
+def memories(request):
+    today = date.today()
+    entries = request.client.memories(for_date=today.strftime("%Y-%m-%d"))
+
+    items = []
+    for memory in entries:
+        year = (memory.get("data") or {}).get("year")
+        assets = memory.get("assets") or []
+        if not assets:
+            continue
+        label = str(year) if year else localise(30069)
+        url = request.url(action="memory", id=memory["id"])
+        item = folder_item(
+            label,
+            thumb=request.client.thumbnail_url(assets[0]["id"]),
+            icon_name="memories",
+            label2=localise(30085) % len(assets),
+        )
+        item.addContextMenuItems(_slideshow_menu(request, url))
+        items.append((url, item, True))
+
+    if not items:
+        notify(localise(30056), localise(30066))
+    request.add_items(items, content="files", category=localise(30056), sort=FOLDER_SORTS)
+
+
+@route("memory")
+def memory(request):
+    entry = request.client.memory(request.param("id"))
+    _emit_assets(
+        request,
+        request.client.memory_assets(entry),
+        category=str((entry.get("data") or {}).get("year") or localise(30056)),
+    )
+
+
+# -------------------------------------------------------------------- search
+
+
+@route("search")
+def search(request):
+    features = request.client.features(request.cache)
+    items = [
+        (
+            request.url(action="search_text"),
+            menu_item(localise(30060), "search", localise(30080)),
+            True,
+        )
+    ]
+    if features.get("smartSearch", True):
+        items.append(
+            (
+                request.url(action="search_smart"),
+                menu_item(localise(30061), "memories", localise(30062)),
+                True,
+            )
+        )
+    request.add_items(items, content="files", category=localise(30057))
+
+
+def _ask(heading_id: int) -> str:
+    return xbmcgui.Dialog().input(localise(heading_id), type=xbmcgui.INPUT_ALPHANUM).strip()
+
+
+@route("search_text")
+def search_text(request):
+    query = request.param("q") or _ask(30060)
+    if not query:
+        request.fail()
+        return
+    # Recorded on the request so the next-page URL carries it. Without this,
+    # page two re-opens the keyboard instead of paging the same search.
+    request.params["q"] = query
+    assets = request.client.search_metadata(originalFileName=query)
+    if not assets:
+        assets = request.client.search_metadata(description=query)
+    _emit_assets(request, assets, category=query)
+
+
+@route("search_smart")
+def search_smart(request):
+    query = request.param("q") or _ask(30061)
+    if not query:
+        request.fail()
+        return
+    request.params["q"] = query
+    assets = request.client.search_smart(query)
+    _emit_assets(request, assets, category=query)
+
+
+@route("random")
+def random_assets(request):
+    assets = request.client.search_random(size=min(500, request.settings.page_size))
+    _emit_assets(request, assets, category=localise(30058), paged=False)
+
+
+# ------------------------------------------------------------------- actions
+
+
+@route("settings")
+def settings(request):
+    open_settings()
+    request.fail()
+
+
+@route("slideshow")
+def slideshow(request):
+    """Hand a plugin path to Kodi's own slideshow window.
+
+    The builtin re-enumerates the target through the plugin, so the listing is
+    produced exactly as browsing would produce it.
+    """
+    target = request.param("target")
+    if not target:
+        return
+    # SplitParams treats commas as argument separators, so the path is quoted.
+    escaped = target.replace("\\", "\\\\").replace('"', '\\"')
+    xbmc.executebuiltin(f'SlideShow("{escaped}",recursive,notrandom)')
+
+
+@route("test_connection")
+def test_connection(request):
+    try:
+        user = request.client.me()
+        version = request.client.detect_version()
+    except Exception as error:  # noqa: BLE001 - reported to the user verbatim
+        log(f"connection test failed: {error!r}")
+        xbmcgui.Dialog().ok(localise(30007), str(error))
+        return
+    name = user.get("name") or user.get("email") or ""
+    xbmcgui.Dialog().ok(localise(30067), localise(30068) % (name, version))
+
+
+# ------------------------------------------------------------------- helpers
+
+
+def _emit_assets(
+    request, assets, category: str = "", paged: bool = True, timeline_filters: bool = False
+):
+    """Render a list of assets, splitting large sets into pages.
+
+    A month with several thousand photos would otherwise cross the Python to
+    C++ boundary as one enormous list and stall the UI while Kodi builds it.
+
+    `timeline_filters` gates the videos-in-timeline preference, which must not
+    silently hide videos from an album or a search result the user asked for by
+    name.
+    """
+    video_only = request.param("video") == "1"
+    if video_only:
+        assets = [asset for asset in assets if asset.is_video]
+    elif timeline_filters and not request.settings.show_videos_in_timeline:
+        assets = [asset for asset in assets if not asset.is_video]
+
+    page = request.int_param("page", 0)
+    size = request.settings.page_size
+    total = len(assets)
+    window = assets[page * size : (page + 1) * size] if paged and total > size else assets
+
+    quality = request.settings.image_quality
+    name_mode = request.settings.asset_name
+    client = request.client
+
+    items = []
+    for asset in window:
+        thumb = client.thumbnail_url(asset.id)
+        # Kodi only fetches fanart for the focused item, so a full preview is
+        # affordable here and looks far better than a stretched 250px thumb.
+        backdrop = client.image_url(asset.id, "preview")
+        label = asset_label(asset, name_mode)
+        if asset.is_video:
+            url = client.video_url(asset.id)
+            item = video_item(asset, label, url, thumb, fanart=backdrop)
+        else:
+            url = client.image_url(asset.id, quality)
+            item = photo_item(asset, label, url, thumb, fanart=backdrop)
+        items.append((url, item, False))
+
+    if paged and (page + 1) * size < total:
+        remaining = total - (page + 1) * size
+        items.append(
+            (
+                request.url(**dict(request.params, page=page + 1)),
+                folder_item(
+                    localise(30064),
+                    icon_name="next",
+                    label2=localise(30085) % remaining,
+                ),
+                True,
+            )
+        )
+
+    content = "videos" if video_only else "images"
+    request.add_items(items, content=content, category=category, sort=PHOTO_SORTS)

@@ -1,2 +1,6 @@
 debug.py
 pydevd-pycharm.egg
+dist/
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,102 @@
+name: Release
+
+# Tagging is the release trigger. Push a tag matching the addon.xml version
+# and this builds, verifies and publishes the installable zip.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # LibreELEC 12 / Kodi 21 ships Python 3.11, so the tests run against
+          # the interpreter the addon actually has to work on.
+          python-version: "3.11"
+
+      - name: Check the tag matches the addon version
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          addon=$(python3 -c \
+            "import xml.etree.ElementTree as ET; print(ET.parse('addon.xml').getroot().get('version'))")
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "addon=$addon" >> "$GITHUB_OUTPUT"
+          if [ "$tag" != "$addon" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME implies version '$tag' but addon.xml declares '$addon'."
+            echo "::error::Kodi keys its addon cache and update UI off addon.xml, so these must agree."
+            exit 1
+          fi
+          echo "Releasing version $addon"
+
+      - name: Run the offline test suite
+        run: python3 tests/run.py
+
+      - name: Build the zip
+        run: python3 build.py
+
+      - name: Verify the zip is installable by Kodi
+        run: |
+          set -euo pipefail
+          zip="dist/plugin.video.immich-${{ steps.version.outputs.addon }}.zip"
+          test -f "$zip" || { echo "::error::$zip was not produced"; exit 1; }
+          # Kodi rejects an archive whose root is not exactly one directory.
+          roots=$(unzip -Z1 "$zip" | cut -d/ -f1 | sort -u)
+          if [ "$roots" != "plugin.video.immich" ]; then
+            echo "::error::zip root must be exactly 'plugin.video.immich', got: $roots"
+            exit 1
+          fi
+          # addon.xml must sit directly inside that directory.
+          unzip -l "$zip" | grep -q "plugin.video.immich/addon.xml" \
+            || { echo "::error::addon.xml is not at the root of the addon directory"; exit 1; }
+          echo "$zip is well-formed"
+
+      - name: Extract the release notes from addon.xml
+        # Written outside the repo so a later build cannot sweep it into the zip.
+        run: |
+          python3 - <<'PY' > "$RUNNER_TEMP/release-notes.md"
+          import re
+          import xml.etree.ElementTree as ET
+
+          news = ET.parse("addon.xml").getroot().find(".//news")
+          body = (news.text or "").strip() if news is not None else ""
+          # The release title already carries the version, so drop a leading
+          # "v2.0.0" heading line from the news block rather than repeat it.
+          lines = body.splitlines()
+          if lines and re.fullmatch(r"v?\d+(\.\d+)*", lines[0].strip()):
+              body = "\n".join(lines[1:]).strip()
+          print(body or "See the commit history for changes.")
+          print()
+          print("## Install")
+          print()
+          print("Download `plugin.video.immich.zip` below, then in Kodi go to")
+          print("**Settings -> Add-ons -> Install from zip file**.")
+          print()
+          print("Installing over an existing copy keeps your settings.")
+          PY
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # --generate-notes appends GitHub's commit summary beneath the body.
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Immich for Kodi ${{ steps.version.outputs.addon }}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --generate-notes \
+            "dist/plugin.video.immich-${{ steps.version.outputs.addon }}.zip" \
+            "dist/plugin.video.immich.zip"

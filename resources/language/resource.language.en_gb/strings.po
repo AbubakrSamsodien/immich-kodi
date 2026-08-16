@@ -1,0 +1,327 @@
+# Kodi Media Center language file
+# Addon Name: Immich
+# Addon id: plugin.video.immich
+# Addon Provider: Immich Kodi contributors
+msgid ""
+msgstr ""
+"Project-Id-Version: Immich\n"
+"Report-Msgid-Bugs-To: https://github.com/AbubakrSamsodien/immich-kodi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en_GB\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#30000"
+msgid "Immich URL with http(s)://"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Immich API key"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Timeline"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Albums"
+msgstr ""
+
+# empty string with id 30004
+
+msgctxt "#30005"
+msgid "Show only shared albums"
+msgstr ""
+
+# empty strings with id 30006 to 30006
+
+msgctxt "#30007"
+msgid "Connection error"
+msgstr ""
+
+msgctxt "#30008"
+msgid "Can't reach the server. Check the Immich address and that this device can see it."
+msgstr ""
+
+msgctxt "#30009"
+msgid "Authorization error"
+msgstr ""
+
+msgctxt "#30010"
+msgid "The API key was rejected. Check it, and that it has the required permissions."
+msgstr ""
+
+# empty strings with id 30011 to 30014
+
+msgctxt "#30015"
+msgid "Videos"
+msgstr ""
+
+msgctxt "#30016"
+msgid "Label items with"
+msgstr ""
+
+msgctxt "#30017"
+msgid "Date and time"
+msgstr ""
+
+msgctxt "#30018"
+msgid "Original file name"
+msgstr ""
+
+# empty string with id 30019
+
+msgctxt "#30020"
+msgid "Connection"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Server address and credentials"
+msgstr ""
+
+msgctxt "#30022"
+msgid "The full URL, including http:// or https:// and the port number"
+msgstr ""
+
+msgctxt "#30023"
+msgid "Create one in Immich under Account Settings, API Keys"
+msgstr ""
+
+msgctxt "#30024"
+msgid "Test connection"
+msgstr ""
+
+msgctxt "#30025"
+msgid "Check the server is reachable and the key works"
+msgstr ""
+
+msgctxt "#30026"
+msgid "Advanced"
+msgstr ""
+
+msgctxt "#30027"
+msgid "Ignore SSL certificate errors"
+msgstr ""
+
+msgctxt "#30028"
+msgid "Turn on for a self-signed certificate on your own network"
+msgstr ""
+
+msgctxt "#30029"
+msgid "Network timeout (seconds)"
+msgstr ""
+
+msgctxt "#30030"
+msgid "How long to wait for the server before giving up"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Browsing"
+msgstr ""
+
+msgctxt "#30032"
+msgid "What appears in the menus"
+msgstr ""
+
+msgctxt "#30033"
+msgid "Show videos in the timeline"
+msgstr ""
+
+msgctxt "#30034"
+msgid "Turn off for a photos-only timeline"
+msgstr ""
+
+msgctxt "#30035"
+msgid "Include partner photos"
+msgstr ""
+
+msgctxt "#30036"
+msgid "Also show libraries a partner shared with you"
+msgstr ""
+
+msgctxt "#30037"
+msgid "Hide albums you own, leaving only shared ones"
+msgstr ""
+
+msgctxt "#30038"
+msgid "Paging"
+msgstr ""
+
+msgctxt "#30039"
+msgid "Items per page"
+msgstr ""
+
+msgctxt "#30040"
+msgid "Large months are split into pages of this size"
+msgstr ""
+
+msgctxt "#30041"
+msgid "Appearance"
+msgstr ""
+
+msgctxt "#30042"
+msgid "Labels and image quality"
+msgstr ""
+
+msgctxt "#30043"
+msgid "What each photo and video is called in a list"
+msgstr ""
+
+msgctxt "#30044"
+msgid "Photo quality"
+msgstr ""
+
+msgctxt "#30045"
+msgid "Original fails on HEIC and RAW. Preview always works."
+msgstr ""
+
+msgctxt "#30046"
+msgid "Preview (1440px)"
+msgstr ""
+
+msgctxt "#30047"
+msgid "Full size (if the server has it)"
+msgstr ""
+
+msgctxt "#30048"
+msgid "Original file"
+msgstr ""
+
+msgctxt "#30049"
+msgid "Start slideshow"
+msgstr ""
+
+msgctxt "#30050"
+msgid "Not configured"
+msgstr ""
+
+msgctxt "#30051"
+msgid "Set your Immich server URL and API key."
+msgstr ""
+
+msgctxt "#30052"
+msgid "Favourites"
+msgstr ""
+
+msgctxt "#30053"
+msgid "People"
+msgstr ""
+
+msgctxt "#30054"
+msgid "Places"
+msgstr ""
+
+msgctxt "#30055"
+msgid "Tags"
+msgstr ""
+
+msgctxt "#30056"
+msgid "Memories"
+msgstr ""
+
+msgctxt "#30057"
+msgid "Search"
+msgstr ""
+
+msgctxt "#30058"
+msgid "Random"
+msgstr ""
+
+msgctxt "#30059"
+msgid "Settings"
+msgstr ""
+
+msgctxt "#30060"
+msgid "Search your photos"
+msgstr ""
+
+msgctxt "#30061"
+msgid "Smart search"
+msgstr ""
+
+msgctxt "#30062"
+msgid "Describe a photo in your own words"
+msgstr ""
+
+# empty string with id 30063
+
+msgctxt "#30064"
+msgid "Next page"
+msgstr ""
+
+# empty string with id 30065
+
+msgctxt "#30066"
+msgid "Nothing found."
+msgstr ""
+
+msgctxt "#30067"
+msgid "Connected"
+msgstr ""
+
+msgctxt "#30068"
+msgid "Signed in as %s. Immich server %s."
+msgstr ""
+
+msgctxt "#30069"
+msgid "On this day"
+msgstr ""
+
+# empty string with id 30070
+
+msgctxt "#30071"
+msgid "Browse everything by month"
+msgstr ""
+
+# empty string with id 30072
+
+msgctxt "#30073"
+msgid "Videos only, by month"
+msgstr ""
+
+msgctxt "#30074"
+msgid "Albums you own and albums shared with you"
+msgstr ""
+
+msgctxt "#30075"
+msgid "Photos and videos you starred"
+msgstr ""
+
+msgctxt "#30076"
+msgid "Faces Immich recognised"
+msgstr ""
+
+msgctxt "#30077"
+msgid "Where your photos were taken"
+msgstr ""
+
+msgctxt "#30078"
+msgid "Your Immich tags"
+msgstr ""
+
+msgctxt "#30079"
+msgid "This day in past years"
+msgstr ""
+
+msgctxt "#30080"
+msgid "Find photos by file name or description"
+msgstr ""
+
+msgctxt "#30081"
+msgid "A random handful from your whole library"
+msgstr ""
+
+msgctxt "#30082"
+msgid "Immich server and display settings"
+msgstr ""
+
+# empty strings with id 30083 to 30084
+
+msgctxt "#30085"
+msgid "%d items"
+msgstr ""
+
+msgctxt "#30086"
+msgid "Immich server error"
+msgstr ""

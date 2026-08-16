@@ -1,49 +1,132 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Setting ids are a compatibility surface: Kodi matches saved values in
+  userdata by id, so renaming one silently discards the user's value on
+  upgrade. immich_url, api_key, shared_only and asset_name predate this
+  version and must keep their ids. New settings all carry a default so an
+  upgraded install behaves sensibly without the user opening this dialog.
+-->
 <settings version="1">
     <section id="plugin.video.immich">
-        <category id="general" label="30000" help="">
-            <group id="0" label="">
-                <setting id="immich_url" type="string" label="30000">
+
+        <category id="connection" label="30020" help="30021">
+            <group id="1" label="30020">
+                <setting id="immich_url" type="string" label="30000" help="30022">
                     <level>0</level>
                     <default/>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
                     <control format="string" type="edit">
+                        <heading>30000</heading>
                     </control>
                 </setting>
-                <setting id="api_key" type="string" label="30001">
+                <setting id="api_key" type="string" label="30001" help="30023">
                     <level>0</level>
                     <default/>
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
                     <control format="string" type="edit">
+                        <heading>30001</heading>
                     </control>
                 </setting>
-                <setting id="shared_only" type="boolean" label="30005">
+                <setting id="test_connection" type="action" label="30024" help="30025">
                     <level>0</level>
+                    <!-- $ID expands to the addon id. RunPlugin calls back in
+                         without navigating away from the settings dialog. -->
+                    <data>RunPlugin(plugin://$ID/?action=test_connection)</data>
+                    <control type="button" format="action">
+                        <close>false</close>
+                    </control>
+                </setting>
+            </group>
+            <group id="2" label="30026">
+                <setting id="ignore_ssl_errors" type="boolean" label="30027" help="30028">
+                    <level>2</level>
                     <default>false</default>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="toggle">
-                    </control>
+                    <control type="toggle"/>
                 </setting>
-                <setting id="asset_name" type="integer" label="30016">
-                    <level>0</level>
-					<default>0</default>
-					<constraints>
-						<options>
-							<option label="30017">0</option>
-							<option label="30018">1</option>
-						</options>
-					</constraints>
-					<control format="string" type="list">
-						<heading>30016</heading>
-					</control>
+                <setting id="timeout" type="integer" label="30029" help="30030">
+                    <level>2</level>
+                    <default>20</default>
+                    <constraints>
+                        <minimum>5</minimum>
+                        <step>5</step>
+                        <maximum>120</maximum>
+                    </constraints>
+                    <control type="slider" format="integer">
+                        <popup>true</popup>
+                    </control>
                 </setting>
             </group>
         </category>
+
+        <category id="browsing" label="30031" help="30032">
+            <group id="1" label="30031">
+                <setting id="show_videos_in_timeline" type="boolean" label="30033" help="30034">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="include_partners" type="boolean" label="30035" help="30036">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="shared_only" type="boolean" label="30005" help="30037">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+            </group>
+            <group id="2" label="30038">
+                <setting id="page_size" type="integer" label="30039" help="30040">
+                    <level>2</level>
+                    <default>500</default>
+                    <constraints>
+                        <minimum>50</minimum>
+                        <step>50</step>
+                        <maximum>2000</maximum>
+                    </constraints>
+                    <control type="slider" format="integer">
+                        <popup>true</popup>
+                    </control>
+                </setting>
+            </group>
+        </category>
+
+        <category id="appearance" label="30041" help="30042">
+            <group id="1" label="30041">
+                <setting id="asset_name" type="integer" label="30016" help="30043">
+                    <level>0</level>
+                    <default>0</default>
+                    <constraints>
+                        <options>
+                            <option label="30017">0</option>
+                            <option label="30018">1</option>
+                        </options>
+                    </constraints>
+                    <control format="string" type="list">
+                        <heading>30016</heading>
+                    </control>
+                </setting>
+                <setting id="image_quality" type="integer" label="30044" help="30045">
+                    <level>0</level>
+                    <default>0</default>
+                    <constraints>
+                        <options>
+                            <option label="30046">0</option>
+                            <option label="30047">1</option>
+                            <option label="30048">2</option>
+                        </options>
+                    </constraints>
+                    <control format="string" type="list">
+                        <heading>30044</heading>
+                    </control>
+                </setting>
+            </group>
+        </category>
+
     </section>
 </settings>

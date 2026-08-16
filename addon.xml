@@ -1,22 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The id must never change: Kodi keys userdata/addon_data by it, so renaming
+  would orphan every existing user's settings on upgrade.
+-->
 <addon id="plugin.video.immich"
-       version="1.0.0"
+       version="2.0.0"
        name="Immich"
-       provider-name="Immich">
+       provider-name="Immich Kodi contributors">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
     </requires>
     <extension point="xbmc.python.pluginsource" library="addon.py">
-        <provides>image</provides>
+        <!-- Section membership comes from this list, not the id prefix. Both
+             values are needed so the addon appears under Pictures as well as
+             Videos, since it serves stills and video from one tree. -->
+        <provides>video image</provides>
     </extension>
     <extension point="xbmc.addon.metadata">
-        <summary lang="en_GB">Immich</summary>
-        <description lang="en_GB">A (unofficial) plugin to view your media from Immich.</description>
+        <summary lang="en_GB">Browse your Immich photo and video library</summary>
+        <description lang="en_GB">An unofficial plugin for Immich. Browse your library by month, album, person, place, tag or memory, search it by text or by description, and play it back on your TV. Requires an Immich server and an API key.</description>
         <license>MIT</license>
+        <source>https://github.com/AbubakrSamsodien/immich-kodi</source>
+        <platform>all</platform>
+        <!-- Reuses the Python interpreter between navigations. Every module in
+             this addon reads sys.argv per invocation, which is the condition
+             this requires. -->
+        <reuselanguageinvoker>true</reuselanguageinvoker>
         <assets>
             <icon>resources/icon.png</icon>
             <fanart>resources/fanart.jpg</fanart>
         </assets>
-        <news>Updated with latest artwork metadata</news>
+        <news>
+v2.0.0
+- Fixed menu entries showing a generic video icon; every entry now has its own artwork.
+- Timeline no longer makes one API request per photo. Opening a month is dramatically faster.
+- Added People, Places, Tags, Memories, Favourites, Search and Random.
+- Added slideshow support from any listing.
+- Detects the Immich server version and adapts, from 1.13x through 3.x.
+- Fixed a crash on a fresh install before settings were entered.
+- Albums keep working on Immich 3.x, which removed the embedded asset list.
+- Added a connection test, an SSL override for self-signed certificates and a network timeout.
+        </news>
     </extension>
 </addon>
