@@ -4,7 +4,7 @@
   would orphan every existing user's settings on upgrade.
 -->
 <addon id="plugin.video.immich"
-       version="2.2.0"
+       version="2.2.1"
        name="Immich"
        provider-name="Immich Kodi contributors">
     <requires>
@@ -17,10 +17,16 @@
         <import addon="xbmc.python" version="3.0.1"/>
     </requires>
     <extension point="xbmc.python.pluginsource" library="addon.py">
-        <!-- Section membership comes from this list, not the id prefix. Both
-             values are needed so the addon appears under Pictures as well as
-             Videos, since it serves stills and video from one tree. -->
-        <provides>video image</provides>
+        <!-- Pictures only, and deliberately so. Section membership comes from
+             this list, not the id prefix. Adding `video` puts the addon in the
+             Videos section too, where CGUIWindowVideoBase has no image path at
+             all: a still goes straight to PlayItem() and the player fails on a
+             JPEG. The Pictures window handles both media types, because
+             CGUIWindowPictures::OnPlayMedia delegates videos to the normal
+             player and sends everything else to ShowPicture. That also gives
+             the native slideshow, which steps through photos and videos in one
+             sequence. -->
+        <provides>image</provides>
     </extension>
     <extension point="xbmc.addon.metadata">
         <summary lang="en_GB">Browse your Immich photo and video library</summary>
@@ -39,9 +45,9 @@
             <fanart>resources/fanart.jpg</fanart>
         </assets>
         <news>
-v2.2.0
-- New Video playback setting. On a Raspberry Pi 5, choosing Original plays HEVC video in hardware instead of a software-decoded 720p transcode.
-- Added Raspberry Pi 5 guidance to the README.
+v2.2.1
+- Fixed photos not opening. The addon is listed under Pictures again; the Videos section cannot display images at all, and 2.0.0 wrongly added it there.
+- Clicking any item now opens Kodi's picture viewer, which steps through photos and videos in one sequence. Enable "Show video files in listings" under Settings, Media, Pictures to include videos.
 </news>
     </extension>
 </addon>

@@ -2660,6 +2660,46 @@ def setting_video_playback(h):
     return problems
 
 
+@case("regression: the addon is listed under Pictures only")
+def provides_pictures_only(h):
+    """Reported on a Raspberry Pi 5: clicking any photo did nothing.
+
+    CGUIWindowVideoBase has no image handling — OnFileAction sends a non-folder
+    item straight to PlayItem(), and the video player fails on a JPEG. Only
+    CGUIWindowPictures can display a still, and it plays videos too, so one
+    section serves both. Declaring `video` in <provides> adds a second entry
+    point where every photo is broken.
+    """
+    import xml.etree.ElementTree as ET
+
+    problems = []
+    root = ET.parse(os.path.join(REPO, "addon.xml")).getroot()
+    provides = (root.findtext(".//provides") or "").split()
+    if "video" in provides:
+        problems.append(
+            "addon.xml declares <provides>video</provides>, which lists the "
+            "addon under Videos where CGUIWindowVideoBase cannot display a "
+            "still; every photo fails there"
+        )
+    if provides != ["image"]:
+        problems.append(f"expected <provides>image</provides>, got {provides}")
+
+    # A still must still be classified as a picture: CFileItem::IsPicture
+    # returns true on HasPictureInfoTag, which getPictureInfoTag creates.
+    h.reset()
+    record = h.invoke("action=bucket&id=2026-08-01")
+    stills = [i for u, i, _f in record.items if "/video/playback" not in u]
+    if not stills:
+        problems.append("no stills in the bucket listing to check")
+    for item in stills:
+        if not item.picture_tag_requested:
+            problems.append(
+                f"still {item.label!r} has no picture info tag, so "
+                f"CFileItem::IsPicture is false and ShowPicture skips it"
+            )
+    return problems
+
+
 # --------------------------------------------------------------- addon.xml
 
 

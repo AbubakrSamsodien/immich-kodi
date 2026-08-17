@@ -20,6 +20,11 @@ description or natural language. Play any listing as a slideshow.
    zip.
 3. Open the add-on. It will prompt for settings on first run.
 
+The add-on lives under **Pictures → Add-ons**, not Videos. That is deliberate:
+Kodi's video window has no code path for displaying a still, so a photo opened
+from there fails. The Pictures window handles both — it hands videos to the
+normal player and everything else to the picture viewer.
+
 Installing a newer zip over an existing install keeps your settings. Kodi stores
 them in `userdata/addon_data/plugin.video.immich/`, which the installer never
 touches.
@@ -33,6 +38,16 @@ The URL must include the scheme and the port, for example
 `https://photos.example.com` or `http://192.168.1.10:2283`.
 
 Use **Test connection** to confirm both are correct before browsing.
+
+### Browsing photos and videos as one sequence
+
+Clicking any item opens Kodi's picture viewer, which builds a slideshow from
+the whole listing and starts at the item you picked. Next and previous then
+step through the listing as one continuous sequence: photos display, videos
+play, and anything the player cannot handle is skipped.
+
+Videos are only included if **Settings → Media → Pictures → Show video files in
+listings** is on (`pictures.showvideos`). With it off you get photos only.
 
 ### Settings worth knowing
 
