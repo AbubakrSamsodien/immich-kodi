@@ -108,6 +108,40 @@ on a desktop, and listings page server-side so a large album never materialises
 in memory. A 500-item page costs roughly 60-100ms of Python on an A76 —
 see `PERF.md`.
 
+## Known limitation: rotated video
+
+A phone video shot in portrait is usually stored as a landscape frame plus a
+rotation matrix in the container. Browsers apply that matrix, which is why such
+a video looks correct in Immich's own web app. Kodi's demuxer reads it too —
+`DVDDemuxFFmpeg` pulls `AV_PKT_DATA_DISPLAYMATRIX` into `iOrientation` — but
+applying it is the renderer's job, and on some builds it does not. The result is
+sideways content squeezed into an upright frame: the display aspect is honoured
+while the rotation is not.
+
+**No add-on can fix this.** There is no Kodi plugin API to rotate video, and
+declaring a stream aspect makes it worse rather than better, because the aspect
+is already correct.
+
+The fix is to make Immich hand Kodi a stream that needs no rotation. In
+**Administration → Settings → Video Transcoding**:
+
+| Setting | Change to | Why |
+| --- | --- | --- |
+| Transcode policy | **All videos** | The default is `Required`, which only transcodes when the codec is outside `acceptedVideoCodecs` (H.264 by default). An H.264 clip is therefore passed through untouched, rotation matrix included. `Optimal` will not help either for a clip under the target resolution. |
+| Target resolution | 1080p or higher | The default is 720p. |
+| Hardware acceleration | Off, if practical | Immich's software path lets ffmpeg autorotate, which bakes rotation into the output. `NvencHwDecodeConfig`, `QsvHwDecodeConfig`, `VaapiHwDecodeConfig` and `RkmppHwDecodeConfig` all pass `-noautorotate`. |
+
+Then run **Administration → Jobs → Video Conversion** for all assets.
+
+To confirm a given video is being passed through rather than transcoded, compare
+the two endpoints — identical lengths mean no transcode exists:
+
+```sh
+for e in original video/playback; do
+  curl -sI -H "x-api-key: $KEY" "$SERVER/api/assets/$ID/$e" | grep -i '^content-length'
+done
+```
+
 ## Server compatibility
 
 Immich treats its timeline endpoints as internal and has changed their response
