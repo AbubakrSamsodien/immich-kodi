@@ -522,7 +522,18 @@ def test_connection(request):
         xbmcgui.Dialog().ok(localise(30007), str(error))
         return
     name = user.get("name") or user.get("email") or ""
-    xbmcgui.Dialog().ok(localise(30067), localise(30068) % (name, version))
+    lines = [localise(30068) % (name, version)]
+
+    # Naming the missing scope beats Kodi's bare "playback failed".
+    can_download = request.client.can_download_originals()
+    if request.settings.prefer_original_video and can_download is False:
+        lines.append("")
+        lines.append(localise(30096))
+    elif can_download is False:
+        lines.append("")
+        lines.append(localise(30097))
+
+    xbmcgui.Dialog().ok(localise(30067), "\n".join(lines))
 
 
 # ------------------------------------------------------------------- helpers

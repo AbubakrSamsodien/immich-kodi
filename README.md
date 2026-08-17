@@ -37,7 +37,14 @@ in the add-on settings along with your server URL.
 The URL must include the scheme and the port, for example
 `https://photos.example.com` or `http://192.168.1.10:2283`.
 
-Use **Test connection** to confirm both are correct before browsing.
+Use **Test connection** to confirm both are correct before browsing. It also
+reports the key's permissions, and warns if `asset.download` is missing — that
+scope gates the **Original** options for photos and video, and without it Kodi
+reports only "playback failed".
+
+The permissions a full experience needs: `timeline.read`, `asset.read`,
+`asset.view`, `album.read`, `person.read`, `tag.read`, `memory.read`, and
+`asset.download` if you want Original quality. Granting `all` is simplest.
 
 ### Browsing photos and videos as one sequence
 

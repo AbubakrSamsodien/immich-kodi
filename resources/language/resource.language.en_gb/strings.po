@@ -361,3 +361,11 @@ msgstr ""
 msgctxt "#30095"
 msgid "Costs one request per month, so the timeline takes longer to open"
 msgstr ""
+
+msgctxt "#30096"
+msgid "Video playback is set to Original, but this key lacks the asset.download permission, so videos will fail. Add it in Immich, or switch back to Transcoded."
+msgstr ""
+
+msgctxt "#30097"
+msgid "This key lacks asset.download, so the Original options for photos and videos will not work. Transcoded and Preview are unaffected."
+msgstr ""

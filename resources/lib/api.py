@@ -112,6 +112,7 @@ V_VISIBILITY_ENUM = Version(1, 133, 0)  # isArchived -> visibility
 V_BUCKET_SIZE_REMOVED = Version(1, 133, 0)  # size=DAY|MONTH required before
 V_FULLSIZE_THUMB = Version(1, 133, 0)  # ?size=fullsize added
 V_ALBUM_IDS_SEARCH = Version(1, 135, 0)  # search/metadata gained albumIds
+V_KEY_PERMISSIONS = Version(1, 139, 0)  # /api-keys/me exposes the key's scopes
 V_ALBUM_ASSETS_GONE = Version(3, 0, 0)  # albums/{id} no longer embeds assets
 V_ALBUM_IS_SHARED = Version(3, 0, 0)  # ?shared -> ?isShared
 
@@ -528,6 +529,37 @@ class ImmichClient:
 
     def me(self) -> dict:
         return self.request("GET", "/users/me")
+
+    def key_permissions(self) -> Optional[list]:
+        """Scopes granted to the configured API key, or None if unknowable.
+
+        Immich has scoped keys since v1.118 but only exposes the current key's
+        scopes from v1.139. None means "could not ask", which is not the same as
+        "no permissions", so callers must not treat it as a denial.
+        """
+        version = self._version or Version(1, 133, 0)
+        if version < V_KEY_PERMISSIONS:
+            return None
+        try:
+            data = self.request("GET", "/api-keys/me")
+        except ImmichError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        granted = data.get("permissions")
+        return granted if isinstance(granted, list) else None
+
+    def can_download_originals(self) -> Optional[bool]:
+        """Whether the key may fetch `/original`, or None if unknowable.
+
+        `/assets/{id}/original` needs `asset.download`; thumbnails and the
+        transcode only need `asset.view`. Without the scope Kodi reports a bare
+        "playback failed", which tells the user nothing.
+        """
+        granted = self.key_permissions()
+        if granted is None:
+            return None
+        return "asset.download" in granted or "all" in granted
 
     # -- media URLs ----------------------------------------------------------
 

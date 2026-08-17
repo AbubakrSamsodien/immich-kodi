@@ -479,6 +479,10 @@ class Dataset:
         self.malformed = set()      # path prefixes returning invalid JSON
         self.require_api_key = True
         self.path_prefix = ""       # e.g. "/immich" for a subpath reverse proxy
+        # Scopes granted to the configured key. asset.download gates /original.
+        self.key_permissions = ["timeline.read", "asset.read", "asset.view",
+                                "album.read", "person.read", "tag.read",
+                                "memory.read", "server.about", "asset.download"]
 
     def add_motion_photo(self, album_id=None):
         """A still whose container mimetype is video/*.
@@ -732,6 +736,14 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, data.features)
         if route == "/server/ping":
             return self._send(200, {"res": "pong"})
+        if route == "/api-keys/me":
+            # v1.139+. `permissions` is the scope list granted to this key.
+            return self._send(200, {
+                "id": _uuid("k", 1),
+                "name": "kodi",
+                "permissions": list(data.key_permissions),
+                "createdAt": "2026-01-01T00:00:00.000Z",
+            })
         if route == "/users/me":
             return self._send(200, data.me)
 

@@ -4,7 +4,7 @@
   would orphan every existing user's settings on upgrade.
 -->
 <addon id="plugin.video.immich"
-       version="2.3.0"
+       version="2.3.1"
        name="Immich"
        provider-name="Immich Kodi contributors">
     <requires>
@@ -45,9 +45,8 @@
             <fanart>resources/fanart.jpg</fanart>
         </assets>
         <news>
-v2.3.0
-- New "All media" listing: everything by date with no month folders, so pressing next carries on past the end of a month. Kodi cannot continue a slideshow across folders, so this is the way to browse continuously.
-- New optional preview picture on each Timeline month. Off by default because it costs one request per month.
+v2.3.1
+- Test connection now reports when the API key is missing the asset.download permission, which is what makes the Original photo and video options fail with only "playback failed" from Kodi.
 </news>
     </extension>
 </addon>

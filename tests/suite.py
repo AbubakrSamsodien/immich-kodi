@@ -2781,6 +2781,50 @@ def setting_month_previews(h):
     return problems
 
 
+@case("regression: Test connection names a missing asset.download scope")
+def scope_reporting(h):
+    """Reported from real use: Original playback gave only "playback failed".
+
+    /assets/{id}/original needs asset.download; the transcode and thumbnails
+    need only asset.view. Kodi's dialog cannot know that, so the addon has to
+    say it.
+    """
+    problems = []
+
+    # Scope present: no warning.
+    h.reset(video_playback=1)
+    h.invoke("action=test_connection", handle=-1)
+    oks = [d for d in harness.STATE.dialogs if d[0] == "ok"]
+    if oks and localise_text(30096) in oks[0][2]:
+        problems.append("warned about a scope the key actually has")
+
+    # Scope absent while Original is selected: must name it.
+    h.reset(video_playback=1)
+    h.dataset.key_permissions = ["timeline.read", "asset.read", "asset.view"]
+    h.invoke("action=test_connection", handle=-1)
+    oks = [d for d in harness.STATE.dialogs if d[0] == "ok"]
+    if not oks:
+        problems.append("test_connection showed no dialog at all")
+    elif localise_text(30096) not in oks[0][2]:
+        problems.append(
+            f"a missing asset.download scope was not reported while Original "
+            f"playback is selected: {oks[0][2]!r}"
+        )
+
+    # Scope absent but Transcoded selected: a milder note, still mentioned.
+    h.reset(video_playback=0)
+    h.dataset.key_permissions = ["timeline.read", "asset.read", "asset.view"]
+    h.invoke("action=test_connection", handle=-1)
+    oks = [d for d in harness.STATE.dialogs if d[0] == "ok"]
+    if oks and localise_text(30097) not in oks[0][2]:
+        problems.append(f"missing scope not mentioned at all: {oks[0][2]!r}")
+    return problems
+
+
+def localise_text(string_id):
+    return STRINGS.get(string_id, f"<missing {string_id}>")
+
+
 # --------------------------------------------------------------- addon.xml
 
 
