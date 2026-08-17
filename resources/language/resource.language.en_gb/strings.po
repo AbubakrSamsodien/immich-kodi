@@ -345,3 +345,19 @@ msgstr ""
 msgctxt "#30091"
 msgid "Original file"
 msgstr ""
+
+msgctxt "#30092"
+msgid "All media"
+msgstr ""
+
+msgctxt "#30093"
+msgid "Everything by date, so next carries on across months"
+msgstr ""
+
+msgctxt "#30094"
+msgid "Preview picture on each month"
+msgstr ""
+
+msgctxt "#30095"
+msgid "Costs one request per month, so the timeline takes longer to open"
+msgstr ""

@@ -83,6 +83,20 @@ transcodes non-H.264 to H.264 720p by default. For an HEVC library the
 *untranscoded* original is both cheaper to decode and higher resolution, which
 is what the **Video playback** setting exposes.
 
+## Month preview thumbnails
+
+Measured on the 120-month library:
+
+| Setting | Requests | Local | At 5ms LAN latency |
+| --- | --- | --- | --- |
+| `month_previews=false` (default) | 2 | 8 ms | ~10 ms |
+| `month_previews=true` | 122 | 231 ms | ~610 ms |
+
+`/api/timeline/buckets` returns only `{timeBucket, count}` and Immich has no
+per-bucket cover image, so a preview means one `POST /search/metadata` per
+month with `size=1`. There is no cheaper route. Hence opt-in, with the cost
+stated in the setting's help text.
+
 ## Known remaining cost
 
 Timeline buckets are still paged client-side: page two of a 900-asset month

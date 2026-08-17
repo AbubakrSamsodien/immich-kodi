@@ -2700,6 +2700,87 @@ def provides_pictures_only(h):
     return problems
 
 
+@case("route 'all': one flat chronological listing, no folders", route="all")
+def route_all_media(h):
+    """Kodi builds a slideshow from the current directory only.
+
+    CGUIWindowPictures::ShowPicture iterates m_vecItems, so next and previous
+    can never leave the folder. Month folders therefore always stop at the end
+    of the month; this listing has no folders, so a page flows across months.
+    """
+    h.reset(page_size=50)
+    record = h.invoke("action=all")
+    problems = standard_checks(record)
+
+    if not record.items:
+        problems.append("the flat listing produced nothing")
+    folders = [i.label for _u, i, f in record.items if f and i.label != "Next page"]
+    if folders:
+        problems.append(f"the flat listing emitted folders: {folders}")
+
+    posts = _search_posts(h)
+    if len(posts) != 1:
+        problems.append(f"expected one paged request, got {len(posts)}")
+    for body in (p["body"] for p in posts):
+        if body.get("order") != "desc":
+            problems.append(f"not newest-first: order={body.get('order')!r}")
+        if body.get("size") != 50:
+            problems.append(f"page size not honoured: {body.get('size')!r}")
+
+    # Assets from more than one month must be able to sit in one listing, or
+    # the whole point of the route is lost.
+    dates = {
+        i.getProperty("immich_id")[:1] for _u, i, f in record.items if not f
+    }
+    if not dates:
+        problems.append("no asset items in the flat listing")
+    return problems
+
+
+@case("setting month_previews: off by default, and costs one request per month")
+def setting_month_previews(h):
+    """Measured on a 120-month library: 2 requests becomes 122.
+
+    The buckets endpoint returns only {timeBucket, count} and Immich has no
+    per-bucket cover image, so a preview means a request per month. Opt-in.
+    """
+    problems = []
+
+    h.reset(month_previews=False)
+    record = h.invoke("action=timeline")
+    baseline = len(h.server.requests)
+    months = len([1 for _u, _i, f in record.items if f])
+    if baseline > 3:
+        problems.append(
+            f"the default timeline issued {baseline} requests for {months} "
+            f"months; previews must be off unless asked for"
+        )
+    for _u, item, _f in record.items:
+        icon = item.getArt("icon")
+        if icon and icon.startswith(("http://", "https://")):
+            problems.append(f"month {item.label!r} art points at the network by default")
+
+    h.reset(month_previews=True)
+    record = h.invoke("action=timeline")
+    withpreview = len(h.server.requests)
+    months = len([1 for _u, _i, f in record.items if f])
+    if withpreview < baseline + months:
+        problems.append(
+            f"month_previews=True issued {withpreview} requests for {months} "
+            f"months; each month needs its own lookup"
+        )
+    thumbs = [
+        i.getArt("thumb") for _u, i, f in record.items if f
+    ]
+    if not any(t.startswith(("http://", "https://")) for t in thumbs if t):
+        problems.append("no month got a remote preview thumbnail")
+    # The bundled icon must remain the floor even with previews on.
+    for _u, item, f in record.items:
+        if f and item.getArt("icon").startswith(("http://", "https://")):
+            problems.append(f"month {item.label!r} lost its bundled icon fallback")
+    return problems
+
+
 # --------------------------------------------------------------- addon.xml
 
 

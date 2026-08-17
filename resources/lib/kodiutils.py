@@ -159,6 +159,15 @@ class Settings:
         return self._int("video_playback", 0) == 1
 
     @property
+    def month_previews(self) -> bool:
+        """Show a cover thumbnail on each timeline month.
+
+        Off by default: it costs one request per month, so a ten-year library
+        turns a two-request menu into well over a hundred.
+        """
+        return self._bool("month_previews", False)
+
+    @property
     def page_size(self) -> int:
         return max(50, self._int("page_size", 500))
 

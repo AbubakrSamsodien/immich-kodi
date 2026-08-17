@@ -75,6 +75,11 @@
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="month_previews" type="boolean" label="30094" help="30095">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="include_partners" type="boolean" label="30035" help="30036">
                     <level>0</level>
                     <default>false</default>

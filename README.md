@@ -49,6 +49,20 @@ play, and anything the player cannot handle is skipped.
 Videos are only included if **Settings → Media → Pictures → Show video files in
 listings** is on (`pictures.showvideos`). With it off you get photos only.
 
+### Two ways to browse
+
+**All media** is one flat chronological listing. Because Kodi builds a
+slideshow from the current directory only
+(`CGUIWindowPictures::ShowPicture` iterates `m_vecItems`), next and previous can
+never cross a folder boundary. So use this if you want to keep pressing next
+and carry on past the end of a month.
+
+**Timeline** groups by month, which is better for finding a particular period,
+but next stops at the end of each month. There is no way around that in Kodi.
+
+The **Start slideshow** context menu on the Timeline itself runs recursively
+across every month, if you want the whole library hands-off.
+
 ### Settings worth knowing
 
 | Setting | Default | Notes |
@@ -56,7 +70,9 @@ listings** is on (`pictures.showvideos`). With it off you get photos only.
 | Photo quality | Preview | `Preview` is a 1440px JPEG the server generates, and always displays. `Original` is the untouched file, so HEIC and RAW will not render in Kodi. `Full size` only works if your admin enabled full-size generation; otherwise Immich falls back to preview. |
 | Ignore SSL certificate errors | Off | Turn on only for a self-signed certificate on your own network. |
 | Include partner photos | Off | Merges libraries a partner shared with you into the timeline. |
-| Items per page | 500 | Months larger than this are split across pages. |
+| Items per page | 500 | Listings larger than this are split across pages. Also the length of one uninterrupted next/previous run in **All media**. |
+| Preview picture on each month | Off | Puts a cover thumbnail on each Timeline month. Costs one request per month: measured on a 120-month library it turns a 2-request menu into 122, roughly 600ms extra before the timeline opens. |
+| Video playback | Transcoded | See the Raspberry Pi 5 section. |
 
 ## Raspberry Pi 5
 

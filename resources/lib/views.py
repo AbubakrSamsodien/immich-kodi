@@ -13,7 +13,7 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
-from api import parse_datetime
+from api import ImmichError, parse_datetime
 from kodiutils import localise, log, notify, open_settings
 from listing import (
     asset_label,
@@ -78,6 +78,7 @@ def root(request):
     # where the target resolves to media without prompting: running it on the
     # search entry would pop an input dialog inside the slideshow window.
     entries = [
+        (30092, "photos", 30093, {"action": "all"}, True),
         (30002, "timeline", 30071, {"action": "timeline"}, True),
         (30015, "videos", 30073, {"action": "videos"}, True),
         (30003, "albums", 30074, {"action": "albums"}, True),
@@ -112,6 +113,21 @@ def root(request):
     )
 
     request.add_items(items, content="files")
+
+
+@route("all")
+def all_media(request):
+    """Everything in one chronological listing, newest first.
+
+    Kodi builds a slideshow from the current directory only
+    (CGUIWindowPictures::ShowPicture iterates m_vecItems), so next and previous
+    can never cross a folder boundary. Month folders therefore always stop at
+    the end of the month. This view has no folders, so a page of it flows
+    straight across month and year boundaries.
+    """
+    assets, more = _search_page(request, order="desc")
+    _emit_assets(request, assets, category=localise(30092),
+                 prefetched=True, has_more=more)
 
 
 @route("videos")
@@ -153,6 +169,38 @@ def _passthrough(request) -> dict:
     return keep
 
 
+def _month_bounds(when):
+    """First and last instant of the month `when` falls in."""
+    start = when.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
+    return start, end
+
+
+def _month_preview(request, when):
+    """Thumbnail of one asset from a month, or None.
+
+    Costs one small request per month, so it is opt-in: the buckets endpoint
+    returns only {timeBucket, count} and there is no per-bucket cover image, and
+    a ten-year library would otherwise turn a two-request menu into 120.
+    """
+    start, end = _month_bounds(when)
+    try:
+        assets, _more = request.client.search_metadata_page(
+            1, 1,
+            takenAfter=start.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            takenBefore=end.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            order="desc",
+            withExif=False,
+        )
+    except ImmichError as error:
+        log(f"month preview failed for {when:%Y-%m}: {error}")
+        return None
+    return request.client.thumbnail_url(assets[0].id) if assets else None
+
+
 @route("timeline")
 def timeline(request):
     # DEPRECATED, advisory, no removal date: `?action=timeline&video=1` was the
@@ -166,6 +214,7 @@ def timeline(request):
 
     buckets = request.client.timeline_buckets(**_timeline_filters(request))
     inherited = _passthrough(request)
+    previews = request.settings.month_previews
 
     items = []
     for bucket in buckets:
@@ -176,6 +225,7 @@ def timeline(request):
         label = format_month(when)
         item = folder_item(
             label,
+            thumb=_month_preview(request, when) if previews else None,
             icon_name="timeline",
             date=when,
             label2=localise(30085) % _count(bucket.get("count")),
