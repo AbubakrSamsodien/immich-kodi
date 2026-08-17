@@ -549,8 +549,14 @@ def route_slideshow(h):
             problems.append(f"unexpected builtin {builtin!r}")
         if target not in builtin:
             problems.append(f"slideshow target was lost: {builtin!r}")
-        if not builtin.endswith(',recursive,notrandom)'):
-            problems.append(f"slideshow flags are wrong: {builtin!r}")
+        # SlideShow(dir[,random|notrandom][,recursive][,pause][,beginslide=])
+        # parses flags by name via CUtil::SplitParams, so assert presence
+        # rather than position.
+        for flag in ("notrandom", "recursive"):
+            if flag not in builtin:
+                problems.append(f"slideshow is missing the {flag!r} flag: {builtin!r}")
+        if "random," in builtin and "notrandom" not in builtin:
+            problems.append(f"slideshow asked for random order: {builtin!r}")
     return problems
 
 
@@ -2437,8 +2443,23 @@ def addon_metadata(h):
     problems = []
     root = ET.parse(os.path.join(REPO, "addon.xml")).getroot()
     version = root.get("version") or ""
-    if version != "2.0.1":
-        problems.append(f"addon.xml version is {version!r}, expected '2.0.1'")
+    # Derived, not pinned: pinning means every release edits a test.
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        problems.append(f"addon.xml version {version!r} is not a release triple")
+
+    # Every v20 API this addon uses (getPictureInfoTag, ListItem.setDateTime,
+    # the InfoTagVideo setters) needs Kodi 20. Kodi 19 ships xbmc.python 3.0.0
+    # and Kodi 20 ships 3.0.1, so declaring 3.0.0 lets Kodi 19 install the
+    # addon and then fail on the first listing.
+    imports = {
+        node.get("addon"): node.get("version")
+        for node in root.findall(".//requires/import")
+    }
+    if imports.get("xbmc.python") != "3.0.1":
+        problems.append(
+            f"addon.xml requires xbmc.python {imports.get('xbmc.python')!r}; "
+            f"'3.0.1' is the Kodi 20 floor this addon's APIs need"
+        )
 
     licence = (root.findtext(".//license") or "").strip()
     if licence != "GPL-3.0-or-later":

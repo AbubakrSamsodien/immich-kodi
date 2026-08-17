@@ -431,7 +431,9 @@ def slideshow(request):
         return
     # SplitParams treats commas as argument separators, so the path is quoted.
     escaped = target.replace("\\", "\\\\").replace('"', '\\"')
-    xbmc.executebuiltin(f'SlideShow("{escaped}",recursive,notrandom)')
+    # Argument order follows the builtin's documented signature:
+    # SlideShow(dir[,random|notrandom][,recursive][,pause][,beginslide=...])
+    xbmc.executebuiltin(f'SlideShow("{escaped}",notrandom,recursive)')
 
 
 @route("test_connection")

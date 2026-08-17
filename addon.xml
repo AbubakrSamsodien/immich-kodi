@@ -4,11 +4,17 @@
   would orphan every existing user's settings on upgrade.
 -->
 <addon id="plugin.video.immich"
-       version="2.0.1"
+       version="2.0.2"
        name="Immich"
        provider-name="Immich Kodi contributors">
     <requires>
-        <import addon="xbmc.python" version="3.0.0"/>
+        <!-- 3.0.1 is Kodi 20 Nexus; Kodi 19 Matrix ships 3.0.0. This addon uses
+             getPictureInfoTag, ListItem.setDateTime and the InfoTagVideo
+             setters, all of which are @python_v20, so declaring 3.0.0 would let
+             Kodi 19 install it and then raise AttributeError on the first
+             listing. Verified against addons/xbmc.python/addon.xml on the
+             Matrix and Nexus branches. -->
+        <import addon="xbmc.python" version="3.0.1"/>
     </requires>
     <extension point="xbmc.python.pluginsource" library="addon.py">
         <!-- Section membership comes from this list, not the id prefix. Both
@@ -33,19 +39,9 @@
             <fanart>resources/fanart.jpg</fanart>
         </assets>
         <news>
-v2.0.1
-- Photo and video rows no longer fall back to a generic icon when a thumbnail has not cached yet.
-- Fixed videos failing to play from the Timeline, Favourites, People and Tags.
-- Videos now lists your videos directly, instead of months that open empty.
-- "Show videos in the timeline" no longer hides videos from Favourites, People and Tags.
-- A permissions error now says the key lacks a scope, rather than blaming the key.
-- Connection failures explain themselves: wrong port, timeout, or self-signed certificate.
-- Timeouts are no longer retried, halving how long a dead server freezes the interface.
-- Month names are translated instead of always English.
-- The SSL override, timeout and page size settings are no longer hidden behind Advanced.
-- Test connection works before both fields are filled in.
-- Corrected the licence tag to GPL-3.0, matching LICENSE.txt.
-- Hardened against malformed server responses, and escaped ids in request paths.
+v2.0.2
+- Declares Kodi 20 as the minimum. The previous manifest let Kodi 19 install the addon, which then failed on the first listing.
+- Slideshow arguments now follow the documented order for the builtin.
 </news>
     </extension>
 </addon>
