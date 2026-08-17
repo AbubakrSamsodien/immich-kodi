@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import socket
 import ssl
 from datetime import datetime, timedelta, timezone
@@ -213,6 +214,24 @@ def _utc_to_naive(value: Optional[str], time_zone: Optional[str] = None) -> Opti
         except Exception:  # noqa: BLE001 - missing tzdata is expected on some builds
             pass
     return parsed.replace(tzinfo=None)
+
+
+_UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                   r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _require_uuid(value: Any, field: str) -> str:
+    """Reject an id the server would reject.
+
+    Ids arrive from plugin:// URLs, which favourites, .strm files and other
+    addons can construct. Immich validates them as UUIDs; checking here means a
+    malformed id fails the same way whether it travels as a path segment or as
+    a JSON body value, instead of silently returning an empty listing.
+    """
+    text = str(value or "")
+    if not _UUID.match(text):
+        raise ImmichHTTPError(400, f"{field} must be a UUID")
+    return text
 
 
 def _segment(value: Any) -> str:
@@ -741,6 +760,27 @@ class ImmichClient:
         # timeline instead.
         return self._assets_via_timeline(albumId=album_id)
 
+    def album_assets_page(self, album_id: str, page: int, size: int,
+                          order: Optional[str] = None) -> tuple:
+        """One page of an album, server-side where the server can do it.
+
+        `/albums/{id}` embeds every asset with no paging, so rendering page six
+        of a 3000-asset album re-downloaded all 3000 full DTOs (4.5 MB) to show
+        500 of them. Search accepts `albumIds` from v1.135 and pages properly.
+
+        An album's `order` is only asc/desc, not a manual sequence, so passing
+        it through preserves the ordering the album actually has.
+        """
+        album_id = _require_uuid(album_id, "albumId")
+        version = self._version or Version(1, 133, 0)
+        if version >= V_ALBUM_IDS_SEARCH:
+            return self.search_metadata_page(
+                page, size, albumIds=[album_id], order=order
+            )
+        assets = self.album_assets(album_id)
+        start = (max(1, page) - 1) * size
+        return assets[start:start + size], start + size < len(assets)
+
     def _assets_via_timeline(self, **filters) -> list:
         """Collect every asset a filtered timeline covers, month by month."""
         assets = []
@@ -773,6 +813,25 @@ class ImmichClient:
                 break
             page += 1
         return assets
+
+    def search_metadata_page(self, page: int, size: int, **filters) -> tuple:
+        """One server-side page of results, plus whether another follows.
+
+        Preferred over `search_metadata` wherever the caller only renders a
+        page. Walking to exhaustion and slicing downloaded every matching asset
+        to show `size` of them, and repeated the whole walk for page two: a
+        2000-video library cost 3.2 MB per page view instead of 0.8 MB.
+
+        `nextPage` is the only reliable end signal, because `total` and `count`
+        both report the current page length rather than a corpus total.
+        """
+        body = {"size": size, "page": max(1, page), "withExif": True}
+        body.update({k: v for k, v in filters.items() if v is not None})
+        data = self.request("POST", "/search/metadata", body=body)
+        block = (data or {}).get("assets") or {}
+        items = block.get("items") or []
+        assets = [self._asset_from_dto(item) for item in items]
+        return assets, bool(block.get("nextPage"))
 
     def search_smart(self, query: str, size: int = 250) -> list:
         data = self.request(

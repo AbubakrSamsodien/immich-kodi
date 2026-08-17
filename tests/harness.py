@@ -160,6 +160,10 @@ class Harness:
         values.update(settings)
         STATE.setting_values.update(values)
 
+    def settings_value(self, key):
+        """The effective value of a setting, as the addon would read it."""
+        return STATE.setting_values.get(key)
+
     def set_setting(self, key, value):
         STATE.setting_values[key] = value
 

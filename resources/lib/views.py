@@ -41,6 +41,13 @@ FOLDER_SORTS = (
 # ---------------------------------------------------------------- root menu
 
 
+def _search_page(request, **filters) -> tuple:
+    """Fetch just the page being rendered, not the whole result set."""
+    size = request.settings.page_size
+    page = request.int_param("page", 0) + 1
+    return request.client.search_metadata_page(page, size, **filters)
+
+
 def _count(value) -> int:
     """Coerce a server-supplied count for `%d` formatting.
 
@@ -116,8 +123,9 @@ def videos(request):
     every photo-only month, each opening empty. Search does take
     `type=VIDEO`, so this is one accurate listing instead of a misleading tree.
     """
-    assets = request.client.search_metadata(type="VIDEO")
-    _emit_assets(request, assets, category=localise(30015))
+    assets, more = _search_page(request, type="VIDEO")
+    _emit_assets(request, assets, category=localise(30015),
+                 prefetched=True, has_more=more)
 
 
 # ------------------------------------------------------------------ timeline
@@ -212,7 +220,9 @@ def albums(request):
     for album in entries:
         if not album.get("id"):
             continue
-        url = request.url(action="album", id=album["id"], title=album.get("albumName", ""))
+        url = request.url(action="album", id=album["id"],
+                          title=album.get("albumName", ""),
+                          order=album.get("order") or "")
         thumbnail = album.get("albumThumbnailAssetId")
         item = folder_item(
             album.get("albumName") or localise(30003),
@@ -229,8 +239,14 @@ def albums(request):
 
 @route("album")
 def album(request):
-    assets = request.client.album_assets(request.param("id"))
-    _emit_assets(request, assets, category=request.param("title", ""))
+    assets, more = request.client.album_assets_page(
+        request.param("id"),
+        request.int_param("page", 0) + 1,
+        request.settings.page_size,
+        order=request.param("order") or None,
+    )
+    _emit_assets(request, assets, category=request.param("title", ""),
+                 prefetched=True, has_more=more)
 
 
 # ---------------------------------------------------------------- favourites
@@ -294,8 +310,9 @@ def places(request):
 
 @route("place")
 def place(request):
-    assets = request.client.search_metadata(city=request.param("city"))
-    _emit_assets(request, assets, category=request.param("title", ""))
+    assets, more = _search_page(request, city=request.param("city"))
+    _emit_assets(request, assets, category=request.param("title", ""),
+                 prefetched=True, has_more=more)
 
 
 # ---------------------------------------------------------------------- tags
@@ -393,8 +410,8 @@ def search_text(request):
     request.params["q"] = query
     # Paging re-invokes this view, so a second fallback query would double the
     # cost of every page. One field, chosen because it is the one users type.
-    assets = request.client.search_metadata(originalFileName=query)
-    _emit_assets(request, assets, category=query)
+    assets, more = _search_page(request, originalFileName=query)
+    _emit_assets(request, assets, category=query, prefetched=True, has_more=more)
 
 
 @route("search_smart")
@@ -462,7 +479,13 @@ def test_connection(request):
 
 
 def _emit_assets(
-    request, assets, category: str = "", paged: bool = True, timeline_filters: bool = False
+    request,
+    assets,
+    category: str = "",
+    paged: bool = True,
+    timeline_filters: bool = False,
+    prefetched: bool = False,
+    has_more: bool = False,
 ):
     """Render a list of assets, splitting large sets into pages.
 
@@ -482,7 +505,11 @@ def _emit_assets(
     page = request.int_param("page", 0)
     size = request.settings.page_size
     total = len(assets)
-    window = assets[page * size : (page + 1) * size] if paged and total > size else assets
+    if prefetched:
+        # The server already returned exactly this page.
+        window = assets
+    else:
+        window = assets[page * size : (page + 1) * size] if paged and total > size else assets
 
     quality = request.settings.image_quality
     name_mode = request.settings.asset_name
@@ -503,15 +530,16 @@ def _emit_assets(
             item = photo_item(asset, label, url, thumb, fanart=backdrop)
         items.append((url, item, False))
 
-    if paged and (page + 1) * size < total:
-        remaining = total - (page + 1) * size
+    more = has_more if prefetched else (paged and (page + 1) * size < total)
+    if more:
+        remaining = 0 if prefetched else total - (page + 1) * size
         items.append(
             (
                 request.url(**dict(request.params, page=page + 1)),
                 folder_item(
                     localise(30064),
                     icon_name="next",
-                    label2=localise(30085) % remaining,
+                    label2="" if prefetched else localise(30085) % remaining,
                 ),
                 True,
             )

@@ -19,6 +19,7 @@ faults; the server reads it on every request.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,7 +52,15 @@ def parse_version(text):
 
 
 def _uuid(prefix: str, index: int) -> str:
-    return f"{prefix}{index:08d}-0000-4000-8000-000000000000"
+    """A deterministic but genuinely valid UUID.
+
+    The old form produced nine characters in the first group and used non-hex
+    prefixes like 'p', so fixture ids were not UUIDs at all. Immich validates
+    ids as UUIDs, so an invalid fixture hides a whole class of behaviour.
+    The prefix is folded to a hex digit, keeping ids distinct per entity type.
+    """
+    head = format(ord(prefix) % 16, "x")
+    return f"{head}{index:07d}-0000-4000-8000-000000000000"
 
 
 def _exif(index: int, city, country):
@@ -825,6 +834,10 @@ class _Handler(BaseHTTPRequestHandler):
         body = body or {}
 
         if route == "/search/metadata":
+            # Immich validates albumIds as UUIDs and 400s on anything else.
+            for album_id in (body.get("albumIds") or []):
+                if not re.match(r"^[0-9a-fA-F-]{36}$", str(album_id)):
+                    return self._error(400, "albumIds must be a UUID")
             pool = data.search_results
             if body.get("albumIds") and self.ver < V_ALBUM_IDS:
                 # whitelist:true strips the unknown key, so the filter vanishes

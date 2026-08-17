@@ -62,8 +62,16 @@ python3 build.py          # writes dist/plugin.video.immich-<version>.zip
 python3 tools/make_icons.py   # regenerates resources/media/ (macOS only)
 ```
 
+```sh
+python3 tests/run.py      # the offline suite
+python3 tests/bench.py    # listing cost against a ten-year library
+```
+
 `resources/lib/api.py` imports nothing from Kodi, so it can be exercised
 directly from a normal Python interpreter.
+
+Read `PERF.md` before proposing a performance change. It records what was
+measured, what was kept, and which plausible ideas were rejected and why.
 
 Bump `version` in `addon.xml` for every build you intend to distribute. Kodi
 does not compare versions when installing from a zip, but its add-on cache and

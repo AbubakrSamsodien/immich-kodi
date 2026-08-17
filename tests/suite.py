@@ -291,17 +291,57 @@ def route_albums(h):
     return problems
 
 
-@case("route 'album': assets embedded in a 2.7.5 album", route="album")
+@case("route 'album': one server-side page, in the album's own order", route="album")
 def route_album(h):
+    """Asserts the contract, not the endpoint.
+
+    This used to require GET /api/albums/{id}, which embeds every asset with no
+    paging: rendering page six of a 3000-asset album re-downloaded all 3000
+    full DTOs. It now pages through search, so what matters is that the album
+    is correctly filtered and ordered, not which call delivers it.
+    """
     h.reset()
-    record = h.invoke(f"action=album&id={ALBUM_1}&title=Holiday+2026")
+    record = h.invoke(f"action=album&id={ALBUM_1}&title=Holiday+2026&order=asc")
     problems = standard_checks(record, expect_content="images")
     if len(record.items) != 6:
         problems.append(f"expected 6 album assets, got {len(record.items)}")
-    if not any(r["path"] == f"/api/albums/{ALBUM_1}" for r in h.server.requests):
-        problems.append("2.7.5 album assets were not read from GET /api/albums/{id}")
     if record.categories and record.categories[0][1] != "Holiday 2026":
         problems.append(f"album category is {record.categories[0][1]!r}")
+
+    posts = [r for r in h.server.requests if r["path"].endswith("/search/metadata")]
+    if not posts:
+        problems.append("the album was not fetched through a paged endpoint")
+    else:
+        body = posts[0]["body"]
+        if body.get("albumIds") != [ALBUM_1]:
+            problems.append(f"album filter missing from the search body: {body}")
+        # An album's order is asc/desc, so it must be carried through or the
+        # listing silently takes the server default instead of the album's.
+        if body.get("order") != "asc":
+            problems.append(f"the album's order was dropped: {body.get('order')!r}")
+        if body.get("size") != h.settings_value("page_size"):
+            problems.append(f"page size not honoured: {body.get('size')!r}")
+
+    # The albums listing must forward the order, or the album route cannot know
+    # it. `order` is optional on AlbumResponseDto, so an album that declares
+    # none simply takes the server default at both ends.
+    h.reset()
+    listing = h.invoke("action=albums")
+    declared = {a["id"]: a.get("order") for a in h.dataset.albums}
+    checked = 0
+    for url, item, _f in listing.items:
+        query = dict(parse_qsl(urlparse(url).query))
+        if query.get("action") != "album":
+            continue
+        want = declared.get(query.get("id"))
+        if want:
+            checked += 1
+            if query.get("order") != want:
+                problems.append(
+                    f"album link for {item.label!r} dropped order={want!r}"
+                )
+    if not checked:
+        problems.append("no album in the fixture declares an order to check")
     return problems
 
 
@@ -2485,6 +2525,97 @@ def packaging_single_identity(h):
     missing = declared - set(registered)
     if missing:
         problems.append(f"the flat route registry is missing {sorted(missing)}")
+    return problems
+
+
+# ========================================================================
+# Paging cost (see tests/bench.py for the measurements these lock in)
+# ========================================================================
+
+
+def _search_posts(h):
+    return [r for r in h.server.requests if r["path"].endswith("/search/metadata")]
+
+
+@case("perf: videos fetches one page, not the whole result set")
+def perf_videos_single_page(h):
+    """search_metadata used to walk every page and slice out one.
+
+    Measured on a 2000-video library: 3.2 MB downloaded to render 500 items,
+    and the whole walk repeated for page two. Server-side paging makes the cost
+    constant per page.
+    """
+    h.reset(page_size=50)
+    record = h.invoke("action=videos&page=2")
+    problems = standard_checks(record)
+
+    posts = _search_posts(h)
+    if len(posts) != 1:
+        problems.append(
+            f"rendering one page issued {len(posts)} search requests; it must "
+            f"fetch only the page being shown"
+        )
+    for body in (p["body"] for p in posts):
+        if body.get("page") != 3:
+            problems.append(f"asked for page {body.get('page')!r}, expected 3")
+        if body.get("size") != 50:
+            problems.append(f"asked for size {body.get('size')!r}, expected 50")
+        if body.get("type") != "VIDEO":
+            problems.append(f"lost the type filter: {body}")
+    if len(record.items) > 51:
+        problems.append(
+            f"emitted {len(record.items)} items for a 50-item page, so the "
+            f"whole result set is still being materialised"
+        )
+    return problems
+
+
+@case("perf: an album page does not re-download the whole album")
+def perf_album_single_page(h):
+    """GET /albums/{id} embeds every asset with no paging.
+
+    Measured on a 3000-asset album: 4.5 MB and ~100 ms per page, identical on
+    page six as on page one.
+    """
+    h.reset(page_size=50)
+    record = h.invoke(f"action=album&id={ALBUM_1}&title=x&order=asc&page=5")
+    problems = standard_checks(record)
+
+    if any(r["path"].endswith(f"/albums/{ALBUM_1}") for r in h.server.requests):
+        problems.append(
+            "the album was re-fetched through GET /api/albums/{id}, which "
+            "returns every asset regardless of the page being rendered"
+        )
+    posts = _search_posts(h)
+    if len(posts) != 1:
+        problems.append(f"expected one paged request, got {len(posts)}")
+    for body in (p["body"] for p in posts):
+        if body.get("page") != 6:
+            problems.append(f"asked for page {body.get('page')!r}, expected 6")
+        if body.get("size") != 50:
+            problems.append(f"asked for size {body.get('size')!r}, expected 50")
+    return problems
+
+
+@case("perf: a malformed album id is rejected before any request is sent")
+def perf_album_id_validated(h):
+    """Client-side, so it holds whether the id travels as a path or a body key.
+
+    Without it the addon relies on the server to reject the value, which costs
+    a round trip and depends on the server validating at all.
+    """
+    h.reset()
+    record = h.invoke("action=album&id=not-a-uuid&title=x")
+    problems = []
+    if record.exception is not None:
+        problems.append(f"unhandled exception: {record.exception!r}")
+    if _search_posts(h):
+        problems.append(
+            "a malformed album id still reached the server; it must be "
+            "rejected client-side"
+        )
+    if record.end_of_directory and record.end_of_directory[0][1]:
+        problems.append("a malformed album id produced a successful listing")
     return problems
 
 
