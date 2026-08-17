@@ -43,6 +43,33 @@ Use **Test connection** to confirm both are correct before browsing.
 | Include partner photos | Off | Merges libraries a partner shared with you into the timeline. |
 | Items per page | 500 | Months larger than this are split across pages. |
 
+## Raspberry Pi 5
+
+Two things about that board change the right settings.
+
+**Video.** The Pi 5 spec lists a *4Kp60 HEVC decoder* and no hardware H.264
+decoder — the Pi 4 had one, the Pi 5 dropped it. Immich's default transcode
+policy accepts H.264 only (`acceptedVideoCodecs: [H264]`) and re-encodes
+everything else to H.264 at 720p. So a phone HEVC clip is served to the Pi as
+software-decoded 720p H.264, while the untouched original would decode in
+hardware at full resolution.
+
+If most of your videos are HEVC — recent iPhones, most modern Android — set
+**Video playback** to *Original file*. Caveats: the API key needs the
+`asset.download` scope, and any container the player cannot handle will fail
+where the transcode would have worked. Leave it on *Transcoded* if your
+library is mostly H.264, which the Pi 5 decodes fine in software at 1080p.
+
+**Photos.** Leave **Photo quality** on *Preview*. The 1440px JPEG the server
+generates is already right-sized for a 4K screen, and *Original* makes the Pi
+decode full-resolution JPEGs — or fail outright on HEIC and RAW.
+
+Everything else is sized for it already. `<reuselanguageinvoker>` keeps the
+Python interpreter alive between navigations, which matters more on a Pi than
+on a desktop, and listings page server-side so a large album never materialises
+in memory. A 500-item page costs roughly 60-100ms of Python on an A76 —
+see `PERF.md`.
+
 ## Server compatibility
 
 Immich treats its timeline endpoints as internal and has changed their response

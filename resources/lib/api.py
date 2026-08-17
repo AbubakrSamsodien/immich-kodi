@@ -563,7 +563,22 @@ class ImmichClient:
             return self._media_url(f"/assets/{_segment(asset_id)}/thumbnail", {"size": "fullsize"})
         return self._media_url(f"/assets/{_segment(asset_id)}/thumbnail", {"size": "preview"})
 
-    def video_url(self, asset_id: str) -> str:
+    def video_url(self, asset_id: str, prefer_original: bool = False) -> str:
+        """URL to play a video.
+
+        `/video/playback` serves Immich's transcode when one exists. Immich's
+        default policy accepts H.264 only and re-encodes everything else to
+        H.264 720p, which is the wrong trade on a Raspberry Pi 5: that board
+        has a 4Kp60 HEVC decoder and no hardware H.264 decoder at all, so the
+        transcode both discards the hardware path and throws away resolution.
+
+        `/original` is byte-for-byte and supports Range requests, so Kodi can
+        seek. It needs the `asset.download` scope rather than `asset.view`, and
+        it will fail on any container the player cannot handle, which is why it
+        is opt-in.
+        """
+        if prefer_original:
+            return self._media_url(f"/assets/{_segment(asset_id)}/original")
         return self._media_url(f"/assets/{_segment(asset_id)}/video/playback")
 
     def person_thumbnail_url(self, person_id: str) -> str:

@@ -2619,6 +2619,47 @@ def perf_album_id_validated(h):
     return problems
 
 
+@case("setting video_playback: transcode by default, original on request")
+def setting_video_playback(h):
+    """Raspberry Pi 5 has a 4Kp60 HEVC decoder and no hardware H.264 decoder.
+
+    Immich's default policy accepts H.264 only and re-encodes everything else
+    to H.264 720p, so on that board the transcode is both software-decoded and
+    downscaled while the original would be neither.
+    """
+    problems = []
+
+    h.reset(video_playback=0)
+    record = h.invoke("action=videos")
+    urls = [u for u, _i, _f in record.items]
+    if not urls:
+        problems.append("no videos listed under the default setting")
+    for url in urls:
+        if "/video/playback" not in url:
+            problems.append(f"default must use the transcode endpoint: {url!r}")
+
+    h.reset(video_playback=1)
+    record = h.invoke("action=videos")
+    urls = [u for u, _i, _f in record.items]
+    if not urls:
+        problems.append("no videos listed with video_playback=1")
+    for url in urls:
+        if "/original" not in url:
+            problems.append(f"video_playback=1 must serve the original: {url!r}")
+        if "/video/playback" in url:
+            problems.append(f"video_playback=1 still hit the transcode: {url!r}")
+
+    # Stills must be unaffected either way.
+    h.reset(video_playback=1)
+    record = h.invoke("action=bucket&id=2026-08-01")
+    for url, item, _f in record.items:
+        if item.video_tag_requested:
+            continue
+        if "/original" in url and h.settings_value("image_quality") == 0:
+            problems.append(f"a still was switched to /original by a video setting: {url!r}")
+    return problems
+
+
 # --------------------------------------------------------------- addon.xml
 
 

@@ -513,6 +513,7 @@ def _emit_assets(
 
     quality = request.settings.image_quality
     name_mode = request.settings.asset_name
+    original_video = request.settings.prefer_original_video
     client = request.client
 
     items = []
@@ -523,7 +524,7 @@ def _emit_assets(
         backdrop = client.image_url(asset.id, "preview")
         label = asset_label(asset, name_mode)
         if asset.is_video:
-            url = client.video_url(asset.id)
+            url = client.video_url(asset.id, prefer_original=original_video)
             item = video_item(asset, label, url, thumb, fanart=backdrop)
         else:
             url = client.image_url(asset.id, quality)

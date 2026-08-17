@@ -150,6 +150,15 @@ class Settings:
         return choices[max(0, min(self._int("image_quality", 0), len(choices) - 1))]
 
     @property
+    def prefer_original_video(self) -> bool:
+        """Play the original container instead of Immich's transcode.
+
+        Worth it where the client decodes the original in hardware and the
+        transcode in software, which is the Raspberry Pi 5 case.
+        """
+        return self._int("video_playback", 0) == 1
+
+    @property
     def page_size(self) -> int:
         return max(50, self._int("page_size", 500))
 

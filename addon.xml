@@ -4,7 +4,7 @@
   would orphan every existing user's settings on upgrade.
 -->
 <addon id="plugin.video.immich"
-       version="2.1.0"
+       version="2.2.0"
        name="Immich"
        provider-name="Immich Kodi contributors">
     <requires>
@@ -39,10 +39,9 @@
             <fanart>resources/fanart.jpg</fanart>
         </assets>
         <news>
-v2.1.0
-- Opening a page of a large album is roughly three times faster. It no longer re-downloads the whole album for every page.
-- The Videos list, Places and search fetch only the page being shown, instead of every matching photo.
-- A malformed album link is now rejected instead of showing an empty album.
+v2.2.0
+- New Video playback setting. On a Raspberry Pi 5, choosing Original plays HEVC video in hardware instead of a software-decoded 720p transcode.
+- Added Raspberry Pi 5 guidance to the README.
 </news>
     </extension>
 </addon>

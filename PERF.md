@@ -63,6 +63,26 @@ Three cases in `tests/suite.py` fail if the paging work is reverted:
 
 Each was verified by reverting the change and confirming the test fails.
 
+## Raspberry Pi 5
+
+The reference target. Cortex-A76 at 2.4GHz is roughly 3-5x slower than a recent
+desktop for single-threaded Python, so the figures above scale accordingly:
+
+| Work | Measured here | Estimated on a Pi 5 |
+| --- | --- | --- |
+| Render a 500-item page (parse + Asset + ListItem) | 20 ms | 60-100 ms |
+| The pre-paging album path (3000 DTOs, 4.5 MB) | ~95 ms | ~300-475 ms |
+
+That second row is why the paging work matters more on this hardware than the
+bench suggests. The multiplier is an estimate, not a measurement; nothing here
+has been profiled on the board itself.
+
+Hardware decode is the one place where the fastest path is counterintuitive:
+the Pi 5 has a 4Kp60 HEVC decoder and no hardware H.264 decoder, while Immich
+transcodes non-H.264 to H.264 720p by default. For an HEVC library the
+*untranscoded* original is both cheaper to decode and higher resolution, which
+is what the **Video playback** setting exposes.
+
 ## Known remaining cost
 
 Timeline buckets are still paged client-side: page two of a 900-asset month

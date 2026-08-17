@@ -329,3 +329,19 @@ msgstr ""
 msgctxt "#30087"
 msgid "The key works, but lacks permission for this. Check its scopes in Immich."
 msgstr ""
+
+msgctxt "#30088"
+msgid "Video playback"
+msgstr ""
+
+msgctxt "#30089"
+msgid "On a Raspberry Pi 5, Original plays HEVC in hardware. Transcoded is the safe choice."
+msgstr ""
+
+msgctxt "#30090"
+msgid "Transcoded (most compatible)"
+msgstr ""
+
+msgctxt "#30091"
+msgid "Original file"
+msgstr ""
