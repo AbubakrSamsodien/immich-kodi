@@ -277,7 +277,7 @@ msgstr ""
 # empty string with id 30072
 
 msgctxt "#30073"
-msgid "Videos only, by month"
+msgid "Every video in your library"
 msgstr ""
 
 msgctxt "#30074"
@@ -324,4 +324,8 @@ msgstr ""
 
 msgctxt "#30086"
 msgid "Immich server error"
+msgstr ""
+
+msgctxt "#30087"
+msgid "The key works, but lacks permission for this. Check its scopes in Immich."
 msgstr ""

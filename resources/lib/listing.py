@@ -22,7 +22,10 @@ import xbmcgui
 from api import Asset
 from kodiutils import ADDON_FANART, media
 
-# Kodi's regional format strings, resolved once per invocation by the caller.
+# Read once per interpreter, not once per invocation: with
+# <reuselanguageinvoker> the module survives between navigations. Changing the
+# Kodi region therefore needs a restart before labels follow. Accepted, because
+# re-reading these on every listing costs two JSON-RPC-backed lookups per row.
 _DATE_LONG = xbmc.getRegion("datelong")
 _TIME = xbmc.getRegion("time")
 
@@ -50,10 +53,14 @@ def format_datetime(value: Optional[datetime]) -> str:
 def format_month(value: datetime) -> str:
     """Month and year, for a timeline bucket label.
 
-    Built from `%B %Y` rather than by stripping the day out of the regional
-    long-date format, which leaves stray separators behind ("June , 2025").
+    Not built by stripping the day out of the regional long-date format, which
+    leaves stray separators behind ("June , 2025"). Not built from `%B` either:
+    that resolves against the C locale, which LibreELEC does not populate, so
+    every label would be English whatever the Kodi language is. Kodi's own core
+    strings 21-32 are the translated month names.
     """
-    return value.strftime("%B %Y")
+    name = xbmc.getLocalizedString(20 + value.month) or value.strftime("%B")
+    return f"{name} {value.year}"
 
 
 def _w3c(value: Optional[datetime]) -> str:
@@ -133,6 +140,25 @@ def folder_item(
     return item
 
 
+def _asset_art(thumb: str, fanart: str, icon_name: str) -> dict:
+    """Art for a photo or video row.
+
+    `icon` stays a bundled file rather than the remote thumbnail. Kodi's skin
+    falls back to DefaultVideo.png whenever the art it is asked for has not
+    resolved — a cold texture cache, a thumbnail job that has not run, a 401
+    after a key rotation — so pointing `icon` at the network reintroduces the
+    generic-icon bug on the largest listings. `thumb` and `poster` carry the
+    real picture; `icon` is the floor beneath them.
+    """
+    fallback = media(f"{icon_name}.png")
+    return {
+        "icon": fallback,
+        "thumb": thumb or fallback,
+        "poster": thumb or fallback,
+        "fanart": fanart or thumb or ADDON_FANART,
+    }
+
+
 def _describe(asset: Asset) -> str:
     """Human-readable metadata block.
 
@@ -205,9 +231,7 @@ def photo_item(
     """
     where = ", ".join(part for part in (asset.city, asset.country) if part)
     item = xbmcgui.ListItem(label=label, label2=where, offscreen=True)
-    item.setArt(
-        {"icon": thumb, "thumb": thumb, "poster": thumb, "fanart": fanart or thumb}
-    )
+    item.setArt(_asset_art(thumb, fanart, "photos"))
 
     picture = item.getPictureInfoTag()
     if asset.width and asset.height:
@@ -218,10 +242,12 @@ def photo_item(
 
     _apply_properties(item, asset)
     item.setProperty("plot", _describe(asset))
-    if asset.mime_type:
+    # A still whose container mimetype is video/* would be reclassified as
+    # video by IsVideo, which is the same trap getVideoInfoTag sets. Motion
+    # photos and Live Photo containers hit this.
+    if asset.mime_type and not asset.mime_type.startswith("video/"):
         item.setMimeType(asset.mime_type)
-    # Suppress the HEAD request Kodi would otherwise issue before opening.
-    item.setContentLookup(False)
+        item.setContentLookup(False)
     item.setPath(url)
     return item
 
@@ -230,9 +256,7 @@ def video_item(
     asset: Asset, label: str, url: str, thumb: str, fanart: str = ""
 ) -> xbmcgui.ListItem:
     item = xbmcgui.ListItem(label=label, offscreen=True)
-    item.setArt(
-        {"icon": thumb, "thumb": thumb, "poster": thumb, "fanart": fanart or thumb}
-    )
+    item.setArt(_asset_art(thumb, fanart, "videos"))
 
     tag = item.getVideoInfoTag()
     tag.setMediaType("video")
@@ -248,9 +272,13 @@ def video_item(
         tag.setCountries([part for part in (asset.city, asset.country) if part])
 
     _apply_properties(item, asset)
+    # Disabling content lookup suppresses the HEAD probe, and the mimetype is
+    # what replaces it. Timeline assets carry no mimetype (the columnar bucket
+    # does not include one) and the playback URL has no file extension, so
+    # disabling the probe there left Kodi with no way to identify the stream.
     if asset.mime_type:
         item.setMimeType(asset.mime_type)
-    item.setContentLookup(False)
+        item.setContentLookup(False)
     item.setProperty("IsPlayable", "true")
     item.setPath(url)
     return item

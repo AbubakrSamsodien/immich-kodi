@@ -91,6 +91,11 @@ def parse_settings(path: str = SETTINGS_PATH) -> dict:
         if not sid:
             continue
         stype = node.get("type") or "string"
+        level_node = node.find("level")
+        try:
+            level = int((level_node.text or "0").strip()) if level_node is not None else 0
+        except (TypeError, ValueError):
+            level = 0
         default_node = node.find("default")
         raw = default_node.text if default_node is not None else None
         if stype == "boolean":
@@ -102,7 +107,7 @@ def parse_settings(path: str = SETTINGS_PATH) -> dict:
                 value = 0
         else:
             value = raw if raw is not None else ""
-        declared[sid] = {"type": stype, "default": value}
+        declared[sid] = {"type": stype, "default": value, "level": level}
     return declared
 
 
@@ -166,6 +171,7 @@ class Recorder:
         self.builtins = []
         self.settings_opened = 0
         self.localized_requests = []  # [(id, found)]
+        self.core_string_requests = []  # [(id, found)] via xbmc.getLocalizedString
         self.setting_requests = []  # [(id, kind, declared)]
         self.region_requests = []
         self.violations = []  # stub-detected API misuse

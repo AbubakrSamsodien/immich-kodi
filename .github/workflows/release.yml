@@ -62,6 +62,11 @@ jobs:
           # addon.xml must sit directly inside that directory.
           unzip -l "$zip" | grep -q "plugin.video.immich/addon.xml" \
             || { echo "::error::addon.xml is not at the root of the addon directory"; exit 1; }
+          # No hidden files. Developer tooling appears in the working tree over
+          # time (.claude/, .idea/, .DS_Store) and must never reach users.
+          if hidden=$(unzip -Z1 "$zip" | grep -E '(^|/)\.' || true); [ -n "$hidden" ]; then
+            echo "::error::hidden paths in the archive:"; echo "$hidden"; exit 1
+          fi
           echo "$zip is well-formed"
 
       - name: Extract the release notes from addon.xml

@@ -6,6 +6,12 @@
   version and must keep their ids. New settings all carry a default so an
   upgraded install behaves sensibly without the user opening this dialog.
 -->
+<!--
+  Levels are 0 (Basic) deliberately: LibreELEC ships the Standard settings
+  level, which hides anything at Advanced. The SSL override and the timeout
+  are advertised features and are exactly what a self-hosted user needs
+  first, so burying them at level 2 made them unreachable.
+-->
 <settings version="1">
     <section id="plugin.video.immich">
 
@@ -43,12 +49,12 @@
             </group>
             <group id="2" label="30026">
                 <setting id="ignore_ssl_errors" type="boolean" label="30027" help="30028">
-                    <level>2</level>
+                    <level>0</level>
                     <default>false</default>
                     <control type="toggle"/>
                 </setting>
                 <setting id="timeout" type="integer" label="30029" help="30030">
-                    <level>2</level>
+                    <level>0</level>
                     <default>20</default>
                     <constraints>
                         <minimum>5</minimum>
@@ -82,7 +88,7 @@
             </group>
             <group id="2" label="30038">
                 <setting id="page_size" type="integer" label="30039" help="30040">
-                    <level>2</level>
+                    <level>0</level>
                     <default>500</default>
                     <constraints>
                         <minimum>50</minimum>

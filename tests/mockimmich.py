@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -457,6 +458,11 @@ class Dataset:
         }
         # Fault injection
         self.offset_hours = 2.0
+        # Fault injection for the transport tests.
+        self.hang_paths = set()      # route prefixes that accept then never reply
+        self.hang_seconds = 12.0
+        self.drop_once = set()       # route prefixes closed once without a reply
+        self.raw_override = {}       # route -> (status, raw bytes) served verbatim
         # <=1.132 made size=DAY|MONTH mandatory on both timeline endpoints.
         # Turn this off to inspect the legacy response shape on its own.
         self.enforce_legacy_size = True
@@ -464,6 +470,20 @@ class Dataset:
         self.malformed = set()      # path prefixes returning invalid JSON
         self.require_api_key = True
         self.path_prefix = ""       # e.g. "/immich" for a subpath reverse proxy
+
+    def add_motion_photo(self, album_id=None):
+        """A still whose container mimetype is video/*.
+
+        Android motion photos and Apple Live Photo containers really do come
+        back as type=IMAGE with originalMimeType video/quicktime.
+        """
+        dto = asset_dto(777)
+        dto["type"] = "IMAGE"
+        dto["originalMimeType"] = "video/quicktime"
+        dto["originalFileName"] = "MVIMG_0777.jpg"
+        if album_id:
+            self.album_assets.setdefault(album_id, []).append(dto)
+        return dto
 
 
 def _strip_v3(album):
@@ -644,6 +664,28 @@ class _Handler(BaseHTTPRequestHandler):
             return
         route = path[len("/api"):]
 
+        if route in self.data.raw_override:
+            status, raw = self.data.raw_override[route]
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            if raw:
+                self.wfile.write(raw)
+            return
+        for bad in list(self.data.drop_once):
+            if route.startswith(bad):
+                # A keep-alive socket the server closed while idle: the client
+                # sees RemoteDisconnected before the request is processed, which
+                # is the one failure a retry may paper over.
+                self.data.drop_once.discard(bad)
+                self.close_connection = True
+                return
+        for bad in self.data.hang_paths:
+            if route.startswith(bad):
+                time.sleep(self.data.hang_seconds)
+                self.close_connection = True
+                return
         for bad, (status, message) in self.data.force_status.items():
             if route.startswith(bad):
                 self._error(status, message)
@@ -790,17 +832,19 @@ class _Handler(BaseHTTPRequestHandler):
                 pass
             elif body.get("albumIds"):
                 pool = data.album_assets.get(body["albumIds"][0], [])
-            elif body.get("city"):
+            if body.get("city"):
                 pool = [
                     a for a in data.search_results
                     if (a.get("exifInfo") or {}).get("city") == body["city"]
                 ] or data.search_results
-            elif body.get("originalFileName"):
+            if body.get("type"):
+                pool = [a for a in pool if a.get("type") == body["type"]]
+            if body.get("originalFileName"):
                 pool = [
                     a for a in data.search_results
                     if body["originalFileName"] in (a.get("originalFileName") or "")
                 ]
-            elif body.get("description"):
+            if body.get("description"):
                 pool = [
                     a for a in data.search_results
                     if body["description"] in ((a.get("exifInfo") or {}).get("description") or "")

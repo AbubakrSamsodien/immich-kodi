@@ -79,6 +79,7 @@ class Invocation:
         self.notifications = []
         self.builtins = []
         self.localized_requests = []
+        self.core_string_requests = []
         self.setting_requests = []
         self.violations = []
         self.list_items = []
@@ -94,6 +95,7 @@ class Invocation:
         self.notifications = list(STATE.notifications)
         self.builtins = list(STATE.builtins)
         self.localized_requests = list(STATE.localized_requests)
+        self.core_string_requests = list(STATE.core_string_requests)
         self.setting_requests = list(STATE.setting_requests)
         self.violations = list(STATE.violations)
         self.list_items = list(STATE.list_items)
@@ -305,6 +307,11 @@ def standard_checks(record, expect_succeeded=True, expect_content=None,
                     f"{where}: endOfDirectory succeeded={succeeded}, expected "
                     f"{expect_succeeded}"
                 )
+            if succeeded and not _cache:
+                problems.append(
+                    f"{where}: endOfDirectory cacheToDisc={_cache}; a cached "
+                    f"listing makes Back free instead of a round trip"
+                )
     else:
         if record.end_of_directory:
             problems.append(
@@ -338,7 +345,16 @@ def standard_checks(record, expect_succeeded=True, expect_content=None,
                 f"{where}: ListItem {item.label!r} has an empty 'icon' art key, "
                 f"so Kodi will fall back to DefaultVideo.png"
             )
-        elif not icon.startswith(("http://", "https://", "special://", "resource://")):
+        elif icon.startswith(("http://", "https://")):
+            # The artwork floor: `icon` must be a bundled file, never remote.
+            # A skin asked for art that has not resolved falls through to
+            # DefaultVideo.png, which is the bug this addon exists to fix.
+            problems.append(
+                f"{where}: ListItem {item.label!r} points 'icon' at a remote "
+                f"URL ({icon!r}); it must be a bundled file so the row never "
+                f"falls back to DefaultVideo.png while the thumbnail caches"
+            )
+        elif not icon.startswith(("special://", "resource://")):
             if not os.path.exists(icon.split("|")[0]):
                 problems.append(
                     f"{where}: ListItem {item.label!r} icon does not exist on "
@@ -346,6 +362,15 @@ def standard_checks(record, expect_succeeded=True, expect_content=None,
                 )
         if not item.label:
             problems.append(f"{where}: emitted a ListItem with an empty label")
+
+        # setContentLookup(False) suppresses the HEAD probe Kodi would use to
+        # learn the stream type, so it is only safe once a mimetype was given.
+        if item.contentlookup is False and not item.mimetype:
+            problems.append(
+                f"{where}: ListItem {item.label!r} disabled content lookup "
+                f"without setting a mimetype, leaving Kodi no way to identify "
+                f"the stream ({url!r})"
+            )
 
         is_video_url = VIDEO_MARKER in url
         if not is_video_url and item.video_tag_requested:
@@ -371,6 +396,18 @@ def standard_checks(record, expect_succeeded=True, expect_content=None,
         if not found:
             problems.append(
                 f"{where}: getLocalizedString({string_id}) is not in strings.po"
+            )
+    for string_id, found in record.core_string_requests:
+        if 30000 <= string_id <= 33999:
+            problems.append(
+                f"{where}: xbmc.getLocalizedString({string_id}) is an addon "
+                f"string id; it resolves against Kodi core strings and returns "
+                f"the wrong text or nothing"
+            )
+        elif not found:
+            problems.append(
+                f"{where}: xbmc.getLocalizedString({string_id}) is not a known "
+                f"Kodi core string"
             )
     for setting_id, kind, declared in record.setting_requests:
         if not declared:

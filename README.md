@@ -99,4 +99,7 @@ not rename `immich_url`, `api_key`, `shared_only` or `asset_name`.
 
 ## Licence
 
-MIT. See `LICENSE.txt`.
+GPL-3.0-or-later. See `LICENSE.txt`.
+
+Earlier versions declared MIT in `addon.xml` while shipping the GPLv3 text. The
+tag was wrong, not the licence; upstream `vladd11/immich-kodi` is GPL-3.0 too.

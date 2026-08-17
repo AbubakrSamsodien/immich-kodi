@@ -17,7 +17,7 @@ import http.client
 import json
 import socket
 import ssl
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import total_ordering
 from hashlib import md5
 from typing import Any, Optional
@@ -26,6 +26,8 @@ from urllib.parse import quote, urlencode, urlparse
 # Kodi caches nothing across plugin invocations, but a window property on the
 # home window outlives them, which is enough to avoid re-probing the version on
 # every directory listing.
+_UTC = timezone.utc
+
 _VERSION_PROPERTY = "immich.server.version"
 _FEATURES_PROPERTY = "immich.server.features"
 
@@ -39,7 +41,21 @@ class ImmichConnectionError(ImmichError):
 
 
 class ImmichAuthError(ImmichError):
-    """The API key was rejected, or lacks the scope for this call."""
+    """The API key was rejected.
+
+    `status` separates the two cases, which need different advice: 401 means
+    the key is wrong, 403 means the key is valid but missing a scope. Immich
+    keys have been scoped since v1.118, and telling someone to regenerate a key
+    that was fine is the most expensive wrong answer this addon can give.
+    """
+
+    def __init__(self, message: str, status: int = 401):
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def is_permission(self) -> bool:
+        return self.status == 403
 
 
 class ImmichHTTPError(ImmichError):
@@ -174,6 +190,89 @@ def local_naive(value: Optional[str]) -> Optional[datetime]:
     """
     parsed = parse_datetime(value)
     return parsed.replace(tzinfo=None) if parsed is not None else None
+
+
+def _utc_to_naive(value: Optional[str], time_zone: Optional[str] = None) -> Optional[datetime]:
+    """Best-effort local wall clock from a UTC instant.
+
+    Immich's `exifInfo.timeZone` is an IANA name, which needs zoneinfo (3.9+)
+    and a tz database the LibreELEC image may not ship. Where it cannot be
+    applied the UTC value is returned naive, which is the previous behaviour and
+    is the best available answer, not a correct one.
+    """
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return None
+    if time_zone:
+        try:
+            from zoneinfo import ZoneInfo
+
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=_UTC)
+            return parsed.astimezone(ZoneInfo(time_zone)).replace(tzinfo=None)
+        except Exception:  # noqa: BLE001 - missing tzdata is expected on some builds
+            pass
+    return parsed.replace(tzinfo=None)
+
+
+def _segment(value: Any) -> str:
+    """Escape an id before it becomes a path segment.
+
+    Ids arrive from plugin:// URLs, which any Kodi favourite, .strm file or
+    other addon can construct. Unescaped, a value like `../../users/me` walks to
+    a different endpoint with the API key header still attached.
+    """
+    return quote(str(value or ""), safe="")
+
+
+def _is_replayable(method: str, path: str) -> bool:
+    """May this request be re-sent without risking a duplicate side effect?
+
+    A dropped keep-alive raises on `getresponse()` as readily as on send, so the
+    client cannot tell whether the server already processed the request. That is
+    harmless for reads and unacceptable for writes, so the retry is restricted
+    to GET and to the search endpoints, which are POST but read-only.
+    """
+    if method == "GET":
+        return True
+    return method == "POST" and path.startswith("/search/")
+
+
+def _is_stale_connection(error: Exception) -> bool:
+    """Is this the specific failure a retry is allowed to paper over?
+
+    Only a keep-alive socket the server closed while idle qualifies. Those
+    raise before the request reaches the server, so re-sending is safe.
+
+    A timeout must NOT be retried: the server may have received and processed
+    the request, and re-sending doubles both the load and the time the Kodi UI
+    stays frozen. A TLS failure must not be retried either — it will fail
+    identically, and the real fix is the certificate setting.
+    """
+    if isinstance(error, (socket.timeout, ssl.SSLError)):
+        return False
+    return isinstance(
+        error,
+        (
+            http.client.NotConnected,
+            http.client.CannotSendRequest,
+            http.client.RemoteDisconnected,
+            http.client.BadStatusLine,
+            ConnectionResetError,
+            BrokenPipeError,
+        ),
+    )
+
+
+def _connection_detail(error: Exception) -> str:
+    """Turn a socket failure into something a user can act on."""
+    if isinstance(error, ssl.SSLError):
+        return f"TLS failed: {error}. For a self-signed certificate, enable the SSL override in settings."
+    if isinstance(error, socket.timeout):
+        return "The server did not respond in time. Raise the timeout in settings if it is just slow."
+    if isinstance(error, ConnectionRefusedError):
+        return "Connection refused. Check the address and port, and that Immich is running."
+    return str(error)
 
 
 def _error_detail(raw: bytes) -> str:
@@ -326,17 +425,17 @@ class ImmichClient:
             connection.request(method, f"{self._prefix}/api{url}", payload, headers)
             response = connection.getresponse()
             raw = response.read()
-        except (http.client.HTTPException, socket.error, OSError) as error:
+        except (http.client.HTTPException, OSError) as error:
             self.close()
-            if _retry:
+            if _retry and _is_replayable(method, path) and _is_stale_connection(error):
                 self._log(f"retrying {method} {url} after {error!r}")
                 return self.request(method, path, params, body, _retry=False)
-            raise ImmichConnectionError(str(error)) from error
+            raise ImmichConnectionError(_connection_detail(error)) from error
 
         if response.status >= 400:
             detail = _error_detail(raw)
             if response.status in (401, 403):
-                raise ImmichAuthError(detail)
+                raise ImmichAuthError(detail, status=response.status)
             raise ImmichHTTPError(response.status, detail)
         if not raw:
             return None
@@ -359,14 +458,24 @@ class ImmichClient:
         if cache is not None:
             cached = cache.get(key)
             if cached:
-                self._version = Version.parse(cached)
-                return self._version
+                parsed = Version.parse(cached)
+                # Version.parse yields 0.0.0 for anything unreadable. Trusting
+                # that would silently drive every gate down the pre-1.118 path,
+                # so a truncated or corrupt property re-probes instead.
+                if parsed.major > 0:
+                    self._version = parsed
+                    return self._version
         data = self.request("GET", "/server/version")
-        self._version = Version(
-            int(data.get("major", 1)),
-            int(data.get("minor", 0)),
-            int(data.get("patch", 0)),
-        )
+        if not isinstance(data, dict):
+            raise ImmichHTTPError(200, "The server did not return a version.")
+        try:
+            self._version = Version(
+                int(data.get("major", 1)),
+                int(data.get("minor", 0)),
+                int(data.get("patch", 0)),
+            )
+        except (TypeError, ValueError) as error:
+            raise ImmichHTTPError(200, f"Unreadable server version: {data!r}") from error
         if cache is not None:
             cache.set(key, str(self._version))
         return self._version
@@ -385,9 +494,15 @@ class ImmichClient:
                 except ValueError:
                     pass
         try:
-            self._features = self.request("GET", "/server/features") or {}
-        except ImmichError:
-            self._features = {}
+            fetched = self.request("GET", "/server/features")
+        except ImmichError as error:
+            # Caching {} here would disable feature gating for the rest of the
+            # Kodi session after a single dropped packet, and gating exists to
+            # hide menu entries that would otherwise 400. Fail open, but do not
+            # persist the failure.
+            self._log(f"feature probe failed, not caching: {error}")
+            return {}
+        self._features = fetched if isinstance(fetched, dict) else {}
         if cache is not None:
             cache.set(key, json.dumps(self._features))
         return self._features
@@ -410,7 +525,7 @@ class ImmichClient:
         return f"{self.base_url}/api{path}{query}|x-api-key={key}"
 
     def thumbnail_url(self, asset_id: str, size: str = "thumbnail") -> str:
-        return self._media_url(f"/assets/{asset_id}/thumbnail", {"size": size})
+        return self._media_url(f"/assets/{_segment(asset_id)}/thumbnail", {"size": size})
 
     def image_url(self, asset_id: str, quality: str = "preview") -> str:
         """URL to display a still.
@@ -422,32 +537,37 @@ class ImmichClient:
         """
         version = self._version or Version(1, 133, 0)
         if quality == "original":
-            return self._media_url(f"/assets/{asset_id}/original")
+            return self._media_url(f"/assets/{_segment(asset_id)}/original")
         # Before v1.133 the size enum was thumbnail|preview only, so asking for
         # fullsize would 400 and the still would not render at all.
         if quality == "fullsize" and version >= V_FULLSIZE_THUMB:
-            return self._media_url(f"/assets/{asset_id}/thumbnail", {"size": "fullsize"})
-        return self._media_url(f"/assets/{asset_id}/thumbnail", {"size": "preview"})
+            return self._media_url(f"/assets/{_segment(asset_id)}/thumbnail", {"size": "fullsize"})
+        return self._media_url(f"/assets/{_segment(asset_id)}/thumbnail", {"size": "preview"})
 
     def video_url(self, asset_id: str) -> str:
-        return self._media_url(f"/assets/{asset_id}/video/playback")
+        return self._media_url(f"/assets/{_segment(asset_id)}/video/playback")
 
     def person_thumbnail_url(self, person_id: str) -> str:
-        return self._media_url(f"/people/{person_id}/thumbnail")
+        return self._media_url(f"/people/{_segment(person_id)}/thumbnail")
 
     # -- normalisation -------------------------------------------------------
 
     def _asset_from_dto(self, data: dict) -> Asset:
         """Build an Asset from a full AssetResponseDto."""
         exif = data.get("exifInfo") or {}
-        taken = local_naive(
-            data.get("localDateTime")
-            or exif.get("dateTimeOriginal")
-            or data.get("fileCreatedAt")
-            or data.get("fileModifiedAt")
-        )
+        # localDateTime and EXIF dateTimeOriginal are already local wall clock.
+        # fileCreatedAt is a UTC instant, so it is only a last resort: without an
+        # offset the true local time is unknowable, and pretending otherwise put
+        # the same asset on two different dates depending on which endpoint
+        # produced it.
+        taken = local_naive(data.get("localDateTime") or exif.get("dateTimeOriginal"))
+        if taken is None:
+            taken = _utc_to_naive(
+                data.get("fileCreatedAt") or data.get("fileModifiedAt"),
+                exif.get("timeZone"),
+            )
         return Asset(
-            id=data["id"],
+            id=data.get("id") or "",
             is_video=data.get("type") == "VIDEO",
             taken_at=taken,
             duration=_parse_duration(data.get("duration")),
@@ -504,9 +624,11 @@ class ImmichClient:
             else:
                 taken = parse_datetime(created[index])
                 offset = offsets[index]
-                if taken is not None and offset is not None:
-                    taken = (taken + timedelta(hours=float(offset))).replace(tzinfo=None)
-                elif taken is not None:
+                if taken is not None:
+                    try:
+                        taken = taken + timedelta(hours=float(offset))
+                    except (TypeError, ValueError):
+                        pass
                     taken = taken.replace(tzinfo=None)
             assets.append(
                 Asset(
@@ -594,7 +716,7 @@ class ImmichClient:
         return data or []
 
     def album(self, album_id: str) -> dict:
-        return self.request("GET", f"/albums/{album_id}")
+        return self.request("GET", f"/albums/{_segment(album_id)}")
 
     def album_assets(self, album_id: str) -> list:
         """Every asset in an album, ordered as the album orders them.
@@ -605,7 +727,7 @@ class ImmichClient:
         """
         version = self._version or Version(1, 133, 0)
         if version < V_ALBUM_ASSETS_GONE:
-            data = self.album(album_id)
+            data = self.album(album_id) or {}
             # Presence of the key decides, not truthiness: a genuinely empty
             # album must return nothing rather than fall through to a broader
             # query that would list unrelated assets.
@@ -703,7 +825,7 @@ class ImmichClient:
         return data or []
 
     def memory(self, memory_id: str) -> dict:
-        return self.request("GET", f"/memories/{memory_id}") or {}
+        return self.request("GET", f"/memories/{_segment(memory_id)}") or {}
 
     def memory_assets(self, memory: dict) -> list:
         return [self._asset_from_dto(item) for item in (memory.get("assets") or [])]

@@ -34,6 +34,11 @@ def read_addon_metadata():
 
 def should_include(path: Path) -> bool:
     relative = path.relative_to(ROOT)
+    # Anything hidden is tooling, not addon content. This is a blanket rule
+    # rather than a list of names because the list is what fails: `.claude/`
+    # appeared mid-project and would otherwise have shipped to users.
+    if any(part.startswith(".") for part in relative.parts):
+        return False
     if EXCLUDED_DIRS.intersection(relative.parts):
         return False
     if relative.name in EXCLUDED_FILES:

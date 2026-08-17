@@ -11,13 +11,11 @@ from __future__ import annotations
 import sys
 from urllib.parse import parse_qsl, urlencode
 
-import xbmc
 import xbmcgui
 import xbmcplugin
 
 from api import ImmichAuthError, ImmichClient, ImmichConnectionError, ImmichError
 from kodiutils import (
-    ADDON_FANART,
     SessionCache,
     Settings,
     error_dialog,
@@ -90,11 +88,17 @@ class Request:
         """False for RunPlugin invocations, which Kodi calls with handle -1."""
         return self.handle >= 0
 
-    def add_items(self, items, content: str = "files", category: str = "", sort=()):
+    def add_items(
+        self, items, content: str = "files", category: str = "", sort=(), cache: bool = True
+    ):
         """Emit a finished directory.
 
         Sort methods are registered before the items because the first
         registered method becomes the listing's default sort.
+
+        `cache` lets Kodi serve this listing from its own cache on Back, which
+        turns every Back press from an API round trip into nothing. Listings
+        whose content is expected to change within a session pass False.
         """
         if not self.is_directory:
             return
@@ -104,8 +108,7 @@ class Request:
         for method in sort:
             xbmcplugin.addSortMethod(self.handle, sortMethod=method)
         xbmcplugin.addDirectoryItems(self.handle, items, len(items))
-        xbmcplugin.setPluginFanart(self.handle, ADDON_FANART)
-        xbmcplugin.endOfDirectory(self.handle, cacheToDisc=False)
+        xbmcplugin.endOfDirectory(self.handle, cacheToDisc=cache)
 
     def fail(self):
         """Abort navigation, leaving the user where they were."""
@@ -113,30 +116,47 @@ class Request:
             xbmcplugin.endOfDirectory(self.handle, succeeded=False)
 
 
+# Reachable before credentials exist, because they are how you supply them.
+_NEEDS_NO_CREDENTIALS = ("settings", "test_connection")
+
+
 def dispatch(argv):
     """Route one invocation, converting API failures into user-facing dialogs."""
-    request = Request(argv)
+    try:
+        request = Request(argv)
+    except (IndexError, ValueError) as error:
+        # A malformed argv cannot produce a handle to fail against, so there is
+        # nothing to do but log it. Letting it escape would hang the Kodi UI.
+        log_error(f"unusable argv {argv!r}: {error!r}")
+        return
 
-    if not request.settings.server_url or not request.settings.api_key:
+    action = request.action
+    if action not in _NEEDS_NO_CREDENTIALS and (
+        not request.settings.server_url or not request.settings.api_key
+    ):
         # Nothing can be listed without credentials, so go straight to setup.
         error_dialog(30050, 30051)
         open_settings()
         request.fail()
         return
 
-    handler = _ROUTES.get(request.action)
+    handler = _ROUTES.get(action)
     if handler is None:
         handler = _ROUTES[""]
 
     try:
         handler(request)
     except ImmichAuthError as error:
-        log_error(f"auth rejected: {error}")
-        error_dialog(30009, 30010)
+        log_error(f"auth rejected ({error.status}): {error}")
+        # A 403 means the key is valid but missing a scope. Telling the user to
+        # replace a working key is the most expensive wrong answer available.
+        error_dialog(30009, 30087 if error.is_permission else 30010)
         request.fail()
     except ImmichConnectionError as error:
         log_error(f"connection failed: {error}")
-        error_dialog(30007, 30008)
+        # The client turns socket failures into advice (wrong port, expired
+        # timeout, self-signed certificate), which beats one generic string.
+        xbmcgui.Dialog().ok(localise(30007), str(error) or localise(30008))
         request.fail()
     except ImmichError as error:
         log_error(f"api error: {error}")

@@ -41,6 +41,18 @@ FOLDER_SORTS = (
 # ---------------------------------------------------------------- root menu
 
 
+def _count(value) -> int:
+    """Coerce a server-supplied count for `%d` formatting.
+
+    A key present with a null value survives `.get(key, 0)`, and `"%d" % None`
+    raises, which would take down the entire listing over one cosmetic label.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _slideshow_menu(request, target_url: str) -> list:
     """Context menu entry that plays a listing as a slideshow."""
     return [
@@ -60,7 +72,7 @@ def root(request):
     # search entry would pop an input dialog inside the slideshow window.
     entries = [
         (30002, "timeline", 30071, {"action": "timeline"}, True),
-        (30015, "videos", 30073, {"action": "timeline", "video": "1"}, False),
+        (30015, "videos", 30073, {"action": "videos"}, True),
         (30003, "albums", 30074, {"action": "albums"}, True),
         (30052, "favourites", 30075, {"action": "favourites"}, True),
     ]
@@ -93,6 +105,19 @@ def root(request):
     )
 
     request.add_items(items, content="files")
+
+
+@route("videos")
+def videos(request):
+    """Every video, newest first.
+
+    Deliberately not a filtered timeline. The timeline endpoints take no asset
+    type filter (reference section 2), so month folders built from them list
+    every photo-only month, each opening empty. Search does take
+    `type=VIDEO`, so this is one accurate listing instead of a misleading tree.
+    """
+    assets = request.client.search_metadata(type="VIDEO")
+    _emit_assets(request, assets, category=localise(30015))
 
 
 # ------------------------------------------------------------------ timeline
@@ -136,7 +161,7 @@ def timeline(request):
             label,
             icon_name="timeline",
             date=when,
-            label2=localise(30085) % bucket.get("count", 0),
+            label2=localise(30085) % _count(bucket.get("count")),
         )
         item.addContextMenuItems(_slideshow_menu(request, url))
         items.append((url, item, True))
@@ -151,11 +176,19 @@ def bucket(request):
         request.param("id"), **_timeline_filters(request)
     )
     when = parse_datetime(request.param("id"))
+    # The preference is "show videos in the timeline", so it applies to the
+    # plain timeline only. Favourites, a person and a tag all reach this route
+    # too, and silently dropping videos from a listing the user asked for by
+    # name is not what the setting says.
+    plain_timeline = not any(
+        request.param(name)
+        for name in ("personId", "tagId", "albumId", "favorite")
+    )
     _emit_assets(
         request,
         assets,
         category=format_month(when) if when else request.param("id", ""),
-        timeline_filters=True,
+        timeline_filters=plain_timeline,
     )
 
 
@@ -177,7 +210,7 @@ def albums(request):
             thumb=request.client.thumbnail_url(thumbnail) if thumbnail else None,
             icon_name="albums",
             date=parse_datetime(album.get("startDate")),
-            label2=localise(30085) % album.get("assetCount", 0),
+            label2=localise(30085) % _count(album.get("assetCount")),
         )
         item.addContextMenuItems(_slideshow_menu(request, url))
         items.append((url, item, True))
@@ -349,9 +382,9 @@ def search_text(request):
     # Recorded on the request so the next-page URL carries it. Without this,
     # page two re-opens the keyboard instead of paging the same search.
     request.params["q"] = query
+    # Paging re-invokes this view, so a second fallback query would double the
+    # cost of every page. One field, chosen because it is the one users type.
     assets = request.client.search_metadata(originalFileName=query)
-    if not assets:
-        assets = request.client.search_metadata(description=query)
     _emit_assets(request, assets, category=query)
 
 
@@ -389,7 +422,12 @@ def slideshow(request):
     produced exactly as browsing would produce it.
     """
     target = request.param("target")
-    if not target:
+    # Plugin URLs are reachable from favourites, keymaps, .strm files and other
+    # addons, so the target is confirmed to be one of ours before it is handed
+    # to a builtin. Without this the action launches a slideshow over any path
+    # the caller names, under this addon's identity.
+    if not target or not target.startswith(request.base_url):
+        log(f"refusing slideshow for a foreign target: {target!r}")
         return
     # SplitParams treats commas as argument separators, so the path is quoted.
     escaped = target.replace("\\", "\\\\").replace('"', '\\"')
@@ -468,5 +506,10 @@ def _emit_assets(
             )
         )
 
-    content = "videos" if video_only else "images"
+    # Content is derived from what the listing actually holds, not from the
+    # legacy `video=1` param. Kodi picks the view modes, the sort options and
+    # the info dialog from this, so the dedicated videos route reporting
+    # "images" presented a videos-only listing as pictures.
+    all_video = bool(window) and all(asset.is_video for asset in window)
+    content = "videos" if (video_only or all_video) else "images"
     request.add_items(items, content=content, category=category, sort=PHOTO_SORTS)

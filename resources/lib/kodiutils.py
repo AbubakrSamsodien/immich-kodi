@@ -72,32 +72,50 @@ class SessionCache:
 
 
 class Settings:
-    """Typed settings access with defaults that survive a blank value.
+    """Typed settings access.
 
-    The previous version called `int()` straight onto a setting string, so a
-    fresh install crashed before the settings dialog could open.
+    A fresh `Addon()` per request, because a long-lived one can hand back stale
+    values once <reuselanguageinvoker> keeps the interpreter alive.
+
+    Kodi supplies the `<default>` from settings.xml for any declared setting, so
+    the `default` arguments here only cover the case where a read raises — a
+    setting missing from the schema, or declared with a different type. The
+    previous version called `int()` straight onto a setting string, so a fresh
+    install crashed before the settings dialog could open.
     """
 
     def __init__(self):
-        self._addon = xbmcaddon.Addon()
+        addon = xbmcaddon.Addon()
+        # xbmcaddon.Settings is the v20+ API; Addon().getSettingString and
+        # friends are deprecated. Fall back for older Kodi builds.
+        self._settings = addon.getSettings() if hasattr(addon, "getSettings") else None
+        self._addon = addon
 
     def _string(self, key: str, default: str = "") -> str:
         try:
-            value = self._addon.getSettingString(key)
-        except (TypeError, ValueError):
+            value = (
+                self._settings.getString(key)
+                if self._settings is not None
+                else self._addon.getSettingString(key)
+            )
+        except (TypeError, ValueError, RuntimeError):
             return default
         return value if value else default
 
     def _bool(self, key: str, default: bool = False) -> bool:
         try:
+            if self._settings is not None:
+                return bool(self._settings.getBool(key))
             return bool(self._addon.getSettingBool(key))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RuntimeError):
             return default
 
     def _int(self, key: str, default: int = 0) -> int:
         try:
+            if self._settings is not None:
+                return int(self._settings.getInt(key))
             return int(self._addon.getSettingInt(key))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RuntimeError):
             return default
 
     @property
@@ -157,4 +175,9 @@ def media(filename: str) -> str:
     paths inside the addon rather than resource:// URLs.
     """
     candidate = os.path.join(MEDIA_PATH, filename)
-    return candidate if os.path.exists(candidate) else ADDON_ICON
+    if os.path.exists(candidate):
+        return candidate
+    # Silently substituting the addon icon is how every row ends up looking the
+    # same, which is the visual signature of the bug this addon exists to fix.
+    log_error(f"missing bundled artwork: resources/media/{filename}")
+    return ADDON_ICON

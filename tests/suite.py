@@ -1547,3 +1547,918 @@ def setting_page_size(h):
             f"value of 10 produced {len(assets)} assets"
         )
     return problems
+
+
+# ==========================================================================
+# v2.0.1 regression lock-ins
+#
+# Each case here fails against v2.0.0. Sources: immich-api-reference.md for
+# API shapes, kodi-api-reference.md for Kodi semantics.
+# ==========================================================================
+
+
+def _md5_namespace(base_url):
+    from hashlib import md5
+
+    return md5(base_url.encode("utf-8")).hexdigest()[:12]
+
+
+def _window(key):
+    return harness.STATE.window_properties.get((10000, key))
+
+
+# ---------------------------------------------------------------- new route
+
+
+@case("v2.0.1 route 'videos': a flat search listing, not a filtered timeline",
+      route="videos")
+def videos_route(h):
+    h.reset()
+    record = h.invoke("action=videos")
+    problems = standard_checks(record)
+
+    if not record.items:
+        problems.append("the videos route produced nothing")
+    for url, item, isfolder in record.items:
+        if isfolder:
+            problems.append(
+                f"views.py:110 videos must be one flat listing, but it emitted "
+                f"the folder {item.label!r}"
+            )
+        elif "/video/playback" not in url:
+            problems.append(f"a still leaked into the videos listing: {url!r}")
+
+    posts = [r for r in h.server.requests if r["path"].endswith("/search/metadata")]
+    if not posts:
+        problems.append("videos did not POST /api/search/metadata")
+    elif posts[0]["body"].get("type") != "VIDEO":
+        problems.append(
+            f"the search body has no type=VIDEO filter: {posts[0]['body']}"
+        )
+    if any(r["path"].endswith("/timeline/buckets") for r in h.server.requests):
+        problems.append(
+            "videos still walks the timeline, which takes no asset-type filter "
+            "(reference section 2), so photo-only months would open empty"
+        )
+
+    content = [value for _handle, value in record.content]
+    if content != ["videos"]:
+        problems.append(
+            f"views.py:509 sets content from the legacy `video=1` param only, so "
+            f"the dedicated videos route reports setContent({content[0]!r}) for a "
+            f"listing that contains nothing but videos. Kodi picks the view mode, "
+            f"the sort options and the info dialog from this, so a videos-only "
+            f"listing is presented as pictures. Trigger: action=videos."
+        )
+    return problems
+
+
+@case("v2.0.1 route 'videos': the legacy video=1 param still works for favourites")
+def videos_legacy_param(h):
+    h.reset()
+    record = h.invoke("action=bucket&id=2026-08-01&video=1")
+    problems = standard_checks(record, expect_content="videos")
+    for url, _item, _f in record.items:
+        if "/video/playback" not in url:
+            problems.append(f"video=1 listing contains a still: {url!r}")
+    if not record.items:
+        problems.append("a saved video=1 favourite now lists nothing")
+    return problems
+
+
+# ------------------------------------------------------------ artwork floor
+
+
+@case("v2.0.1 artwork: photo and video rows keep a bundled icon under the thumbnail")
+def artwork_floor(h):
+    h.reset()
+    problems = []
+    for query in ("action=bucket&id=2026-08-01", f"action=album&id={ALBUM_1}&title=x",
+                  "action=random", "action=videos"):
+        record = h.invoke(query)
+        problems += standard_checks(record)
+        if not record.items:
+            problems.append(f"{query}: nothing emitted")
+        for _url, item, _f in record.items:
+            icon = item.art.get("icon", "")
+            if icon.startswith(("http://", "https://")):
+                problems.append(
+                    f"{query}: {item.label!r} has a remote icon {icon!r}"
+                )
+            elif not os.path.isfile(icon):
+                problems.append(f"{query}: icon {icon!r} is not a file on disk")
+            elif os.path.dirname(icon) != MEDIA_DIR:
+                problems.append(
+                    f"{query}: icon {icon!r} is not one of the bundled media files"
+                )
+            # The real picture must still be reachable.
+            for key in ("thumb", "poster"):
+                if "/api/assets/" not in item.art.get(key, ""):
+                    problems.append(
+                        f"{query}: {item.label!r} art[{key}] is not the remote "
+                        f"thumbnail: {item.art.get(key)!r}"
+                    )
+    return problems
+
+
+# ------------------------------------------- mimetype / content-lookup pair
+
+
+@case("v2.0.1 mimetype: content lookup is disabled only when a mimetype is set")
+def mimetype_pairing(h):
+    h.reset()
+    problems = []
+
+    # A timeline bucket carries no mimetype (reference section 3), so neither
+    # call may happen or Kodi is left unable to identify the stream.
+    bucket = h.invoke("action=bucket&id=2026-08-01")
+    problems += standard_checks(bucket, expect_content="images")
+    for _url, item, _f in bucket.items:
+        if item.mimetype:
+            problems.append(
+                f"a bucket asset has mimetype {item.mimetype!r}, which the "
+                f"columnar bucket cannot supply"
+            )
+        if item.contentlookup is False:
+            problems.append(
+                f"listing.py disabled content lookup on {item.label!r} with no "
+                f"mimetype, so Kodi has neither a HEAD probe nor a type hint"
+            )
+
+    # An album carries full DTOs, so both must happen.
+    album = h.invoke(f"action=album&id={ALBUM_1}&title=x")
+    problems += standard_checks(album, expect_content="images")
+    seen = 0
+    for _url, item, _f in album.items:
+        if not item.mimetype:
+            problems.append(f"album asset {item.label!r} lost its mimetype")
+            continue
+        seen += 1
+        if item.contentlookup is not False:
+            problems.append(
+                f"album asset {item.label!r} has a mimetype but left the HEAD "
+                f"probe enabled"
+            )
+    if not seen:
+        problems.append("no album asset carried a mimetype at all")
+    return problems
+
+
+@case("v2.0.1 mimetype: a still with a video/* container is not tagged as video")
+def mimetype_motion_photo(h):
+    h.reset()
+    h.dataset.add_motion_photo(ALBUM_1)
+    record = h.invoke(f"action=album&id={ALBUM_1}&title=x")
+    problems = standard_checks(record, expect_content="images")
+
+    motion = [i for _u, i, _f in record.items if i.label.startswith("MVIMG_")
+              or i.getProperty("immich_id").endswith("777-0000-4000-8000-000000000000")]
+    if not motion:
+        motion = [i for _u, i, _f in record.items
+                  if "0000777" in i.getProperty("immich_id")]
+    if not motion:
+        problems.append("the motion photo never reached the listing")
+        return problems
+    item = motion[0]
+    if item.mimetype:
+        problems.append(
+            f"listing.py:248 must not pass a video/* mimetype to a still: "
+            f"setMimeType({item.mimetype!r}) makes VIDEO::IsVideo true, so Kodi "
+            f"classifies an Android motion photo as a video"
+        )
+    if item.video_tag_requested:
+        problems.append("the motion photo was given a video info tag")
+    if item.contentlookup is False:
+        problems.append(
+            "content lookup was disabled on the motion photo without a mimetype"
+        )
+    return problems
+
+
+# ------------------------------------------------------- video gate scoping
+
+
+@case("v2.0.1 video gate: show_videos_in_timeline only filters the plain timeline")
+def video_gate_scoping(h):
+    problems = []
+    named = (
+        ("action=bucket&id=2026-08-01&favorite=1", "favourites"),
+        (f"action=bucket&id=2026-08-01&personId={PERSON_1}", "a person"),
+        (f"action=bucket&id=2026-08-01&tagId={TAG_1}", "a tag"),
+        (f"action=bucket&id=2026-08-01&albumId={ALBUM_1}", "an album"),
+    )
+    h.reset(show_videos_in_timeline=False)
+
+    plain = h.invoke("action=bucket&id=2026-08-01")
+    problems += standard_checks(plain, expect_content="images")
+    if any("/video/playback" in u for u, _i, _f in plain.items):
+        problems.append("the plain timeline still shows videos when the setting is off")
+    if not plain.items:
+        problems.append("hiding videos emptied the plain timeline")
+
+    for query, what in named:
+        record = h.invoke(query)
+        problems += standard_checks(record, expect_content="images")
+        if not any("/video/playback" in u for u, _i, _f in record.items):
+            problems.append(
+                f"views.py:183 must treat {what} as a listing the user asked for "
+                f"by name, but show_videos_in_timeline=false removed its videos "
+                f"({query})"
+            )
+    return problems
+
+
+# ------------------------------------------------------------- 403 vs 401
+
+
+@case("v2.0.1 auth: 403 blames the scope, 401 blames the key")
+def auth_403_vs_401(h):
+    problems = []
+    for status, expected_id in ((401, 30010), (403, 30087)):
+        h.reset()
+        h.dataset.force_status["/timeline"] = (status, "nope")
+        record = h.invoke("action=timeline")
+        problems += standard_checks(
+            record, expect_succeeded=False, expect_content=None, allow_dialog=True
+        )
+        oks = [d for d in record.dialogs if d[0] == "ok"]
+        if not oks:
+            problems.append(f"HTTP {status} produced no dialog")
+            continue
+        heading, message = oks[0][1], oks[0][2]
+        if heading != STRINGS[30009]:
+            problems.append(f"HTTP {status}: heading {heading!r}")
+        if message != STRINGS[expected_id]:
+            problems.append(
+                f"HTTP {status}: message {message!r}, expected string "
+                f"{expected_id} {STRINGS[expected_id]!r}"
+            )
+    return problems
+
+
+# ------------------------------------------------------------ retry policy
+
+
+@case("v2.0.1 retry: a timeout is issued exactly once, never replayed")
+def retry_no_timeout_replay(h):
+    h.reset(timeout=5)
+    h.dataset.hang_seconds = 8.0
+    h.dataset.hang_paths.add("/timeline/buckets")
+    record = h.invoke("action=timeline")
+    problems = standard_checks(
+        record, expect_succeeded=False, expect_content=None, allow_dialog=True
+    )
+    hits = [r for r in h.server.requests if r["path"].endswith("/timeline/buckets")]
+    if len(hits) != 1:
+        problems.append(
+            f"api.py:241 must not retry a timeout: the server may already have "
+            f"processed the request, and re-sending doubles how long the Kodi UI "
+            f"stays frozen. Got {len(hits)} requests, expected 1"
+        )
+    return problems
+
+
+@case("v2.0.1 retry: a dropped keep-alive on a GET is replayed exactly once")
+def retry_stale_connection(h):
+    h.reset()
+    h.dataset.drop_once.add("/timeline/buckets")
+    record = h.invoke("action=timeline")
+    problems = standard_checks(record, expect_content="files")
+    # The mock records the request line before dropping the socket, so a
+    # successful single retry is two arrivals: the dropped one and the replay.
+    hits = [r for r in h.server.requests if r["path"].endswith("/timeline/buckets")]
+    if len(hits) != 2:
+        problems.append(
+            f"a dropped keep-alive socket must be replayed exactly once on a "
+            f"fresh connection; the server saw {len(hits)} arrivals, expected 2"
+        )
+    if not record.items:
+        problems.append(
+            "api.py:241 _is_stale_connection must treat RemoteDisconnected as "
+            "retryable; the listing did not recover"
+        )
+    return problems
+
+
+@case("v2.0.1 retry: a dropped keep-alive on a read-only POST is replayed")
+def retry_search_post(h):
+    h.reset()
+    h.dataset.drop_once.add("/search/metadata")
+    record = h.invoke("action=place&city=Amsterdam&title=Amsterdam")
+    problems = standard_checks(record, expect_content="images")
+    if not record.items:
+        problems.append(
+            "api.py:228 allows POST /search/* to be replayed because it is "
+            "read-only, but the listing did not recover"
+        )
+    return problems
+
+
+# --------------------------------------------------- connection diagnostics
+
+
+@case("v2.0.1 connection errors: the dialog explains the failure")
+def connection_diagnostics(h):
+    import socket
+
+    problems = []
+    generic = STRINGS[30008]
+
+    def dialog_of(record):
+        oks = [d for d in record.dialogs if d[0] == "ok"]
+        return oks[0] if oks else None
+
+    # Refused
+    h.reset()
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    dead = probe.getsockname()[1]
+    probe.close()
+    h.set_setting("immich_url", f"http://127.0.0.1:{dead}")
+    record = h.invoke("action=timeline")
+    problems += standard_checks(
+        record, expect_succeeded=False, expect_content=None, allow_dialog=True
+    )
+    entry = dialog_of(record)
+    if entry is None:
+        problems.append("a refused connection produced no dialog")
+    else:
+        if entry[1] != STRINGS[30007]:
+            problems.append(f"refused: heading {entry[1]!r}")
+        if entry[2] == generic or "refused" not in entry[2].lower():
+            problems.append(
+                f"api.py:267 should name the failure; refused connection showed "
+                f"{entry[2]!r}"
+            )
+
+    # TLS: point https:// at the plain-HTTP mock.
+    h.reset()
+    h.set_setting("immich_url", h.server.url.replace("http://", "https://"))
+    record = h.invoke("action=timeline")
+    problems += standard_checks(
+        record, expect_succeeded=False, expect_content=None, allow_dialog=True
+    )
+    entry = dialog_of(record)
+    if entry is None:
+        problems.append("a TLS failure produced no dialog")
+    elif "TLS" not in entry[2]:
+        problems.append(f"TLS failure showed {entry[2]!r}, expected TLS advice")
+
+    # Timeout
+    h.reset(timeout=5)
+    h.dataset.hang_seconds = 8.0
+    h.dataset.hang_paths.add("/server/version")
+    record = h.invoke("action=timeline")
+    problems += standard_checks(
+        record, expect_succeeded=False, expect_content=None, allow_dialog=True
+    )
+    entry = dialog_of(record)
+    if entry is None:
+        problems.append("a timeout produced no dialog")
+    elif "respond in time" not in entry[2]:
+        problems.append(f"timeout showed {entry[2]!r}, expected timeout advice")
+    return problems
+
+
+# -------------------------------------------------------------------- dates
+
+
+@case("v2.0.1 dates: localDateTime, dateTimeOriginal and a UTC instant + timeZone")
+def date_resolution(h):
+    from mockimmich import asset_dto
+
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo("Asia/Tokyo")
+        tz_available = True
+    except Exception:  # noqa: BLE001
+        tz_available = False
+
+    h.reset()
+    # 1: localDateTime wins, and is already local wall clock despite the Z.
+    first = asset_dto(900)
+    first["localDateTime"] = "2026-03-04T18:30:00.000Z"
+    first["fileCreatedAt"] = "2026-03-04T09:00:00.000Z"
+    first["exifInfo"]["dateTimeOriginal"] = "2026-03-04T07:00:00.000Z"
+
+    # 2: no localDateTime, EXIF dateTimeOriginal is also local wall clock.
+    second = asset_dto(901)
+    second.pop("localDateTime")
+    second["fileCreatedAt"] = "2026-03-05T22:00:00.000Z"
+    second["exifInfo"]["dateTimeOriginal"] = "2026-03-05T07:15:00.000Z"
+
+    # 3: only a UTC instant, plus the IANA zone Immich recorded.
+    third = asset_dto(902)
+    third.pop("localDateTime")
+    third["fileCreatedAt"] = "2026-03-06T12:00:00.000Z"
+    third["exifInfo"].pop("dateTimeOriginal")
+    third["exifInfo"]["timeZone"] = "Asia/Tokyo"
+
+    h.dataset.random_results = [first, second, third]
+    record = h.invoke("action=random")
+    problems = standard_checks(record, expect_content="images")
+    labels = [i.label for _u, i, _f in record.items]
+    if len(labels) != 3:
+        problems.append(f"expected 3 assets, got {labels}")
+        return problems
+
+    if "18:30:00" not in labels[0]:
+        problems.append(
+            f"localDateTime must be read as local wall clock, not converted: "
+            f"{labels[0]!r} should carry 18:30:00"
+        )
+    if "07:15:00" not in labels[1]:
+        problems.append(
+            f"exifInfo.dateTimeOriginal must be read as local wall clock: "
+            f"{labels[1]!r} should carry 07:15:00"
+        )
+    expected = "21:00:00" if tz_available else "12:00:00"
+    if expected not in labels[2]:
+        problems.append(
+            f"api.py:195 _utc_to_naive should turn the UTC instant 12:00:00 into "
+            f"{expected} using exifInfo.timeZone=Asia/Tokyo "
+            f"(zoneinfo {'available' if tz_available else 'unavailable'}); got "
+            f"{labels[2]!r}"
+        )
+    return problems
+
+
+# --------------------------------------------------------------- hardening
+
+
+@case("v2.0.1 hardening: malformed server responses stay inside ImmichError")
+def hardening_malformed(h):
+    problems = []
+    cases = [
+        ("/server/version returning an empty body",
+         {"/server/version": (200, b"")}, "action=timeline", False),
+        ("/server/version returning a non-dict",
+         {"/server/version": (200, b'["not", "a", "dict"]')}, "action=timeline", False),
+        (f"/albums/{{id}} returning an empty body",
+         {f"/albums/{ALBUM_1}": (200, b"")},
+         f"action=album&id={ALBUM_1}&title=x", True),
+    ]
+    for label, override, query, succeeds in cases:
+        h.reset()
+        h.dataset.raw_override.update(override)
+        record = h.invoke(query)
+        problems += standard_checks(
+            record, expect_succeeded=succeeds, expect_content=None, allow_dialog=True
+        )
+        if record.exception is not None:
+            problems.append(
+                f"{label}: escaped as {record.exception!r}, which dispatch cannot "
+                f"turn into a dialog"
+            )
+    return problems
+
+
+@case("v2.0.1 hardening: an asset with no id and a non-numeric localOffsetHours")
+def hardening_bad_assets(h):
+    from mockimmich import asset_dto
+
+    problems = []
+
+    h.reset()
+    headless = asset_dto(903)
+    headless.pop("id")
+    h.dataset.random_results = [headless, asset_dto(904)]
+    record = h.invoke("action=random")
+    if record.exception is not None:
+        problems.append(
+            f"api.py:570 must tolerate an asset dict with no id, got "
+            f"{record.exception!r}"
+        )
+    if len(record.end_of_directory) != 1:
+        problems.append("an id-less asset broke the directory")
+
+    h.reset()
+    h.dataset.offset_hours = "not-a-number"
+    record = h.invoke("action=bucket&id=2026-08-01")
+    problems += standard_checks(record, expect_content="images")
+    if record.exception is not None:
+        problems.append(
+            f"api.py:628 must tolerate a non-numeric localOffsetHours, got "
+            f"{record.exception!r}"
+        )
+    if len(record.items) != 12:
+        problems.append(
+            f"a bad offset column cost {12 - len(record.items)} assets"
+        )
+    return problems
+
+
+# ---------------------------------------------------------- path escaping
+
+
+@case("v2.0.1 escaping: a traversal id cannot reach another endpoint")
+def path_escaping(h):
+    h.reset()
+    record = h.invoke("action=album&id=..%2F..%2Fusers%2Fme&title=x")
+    problems = standard_checks(
+        record, expect_succeeded=False, expect_content=None, allow_dialog=True
+    )
+    for request in h.server.requests:
+        if request["path"].endswith("/api/users/me"):
+            problems.append(
+                "api.py:218 _segment must percent-encode an id before it becomes "
+                "a path segment. `?action=album&id=../../users/me` reached "
+                f"{request['path']} with the x-api-key header attached; plugin "
+                "URLs are constructible by favourites, .strm files and other "
+                "addons."
+            )
+        if "/../" in request["path"] or request["path"].endswith("/.."):
+            problems.append(f"an unescaped traversal reached {request['path']!r}")
+    if record.exception is not None:
+        problems.append(f"unhandled exception: {record.exception!r}")
+    return problems
+
+
+# ------------------------------------------------------------ session cache
+
+
+@case("v2.0.1 cache: an unparseable cached version is re-probed")
+def cache_bad_version(h):
+    h.reset()
+    key = f"immich.server.version.{_md5_namespace(h.server.url)}"
+    harness.STATE.window_properties[(10000, key)] = "not-a-version"
+    record = h.invoke("action=timeline")
+    problems = standard_checks(record, expect_content="files")
+    probes = [r for r in h.server.requests if r["path"].endswith("/server/version")]
+    if not probes:
+        problems.append(
+            "api.py:461 Version.parse yields 0.0.0 for anything unreadable. A "
+            "cached 'not-a-version' must be discarded and re-probed, or every "
+            "version gate silently takes the pre-1.118 path"
+        )
+    if _window(key) != "2.7.5":
+        problems.append(f"the cache was not repaired: {_window(key)!r}")
+    return problems
+
+
+@case("v2.0.1 cache: a failed features probe is not cached as empty")
+def cache_features_failure(h):
+    h.reset()
+    key = f"immich.server.features.{_md5_namespace(h.server.url)}"
+    h.dataset.force_status["/server/features"] = (500, "boom")
+    record = h.invoke("")
+    problems = standard_checks(record, expect_content="files")
+    if _window(key) is not None:
+        problems.append(
+            f"api.py:496-504 must not persist a failed feature probe: caching "
+            f"{_window(key)!r} would disable feature gating for the rest of the "
+            f"Kodi session after one dropped packet"
+        )
+    # Failing open: the menu must still be complete.
+    labels = [i.label for _u, i, _f in record.items]
+    if STRINGS[30053] not in labels:
+        problems.append(f"a failed probe hid a menu entry: {labels}")
+
+    # A later successful probe caches the real answer.
+    h.dataset.force_status.pop("/server/features")
+    record = h.invoke("")
+    problems += standard_checks(record, expect_content="files")
+    cached = _window(key)
+    if not cached:
+        problems.append("a successful feature probe was not cached")
+    else:
+        import json
+
+        if json.loads(cached).get("smartSearch") is not True:
+            problems.append(f"the cached features look wrong: {cached!r}")
+    return problems
+
+
+# ----------------------------------------------------------------- counts
+
+
+@case("v2.0.1 counts: a null assetCount or bucket count does not kill the listing")
+def null_counts(h):
+    problems = []
+
+    h.reset()
+    h.dataset.albums[0]["assetCount"] = None
+    h.dataset.albums[1]["assetCount"] = "lots"
+    record = h.invoke("action=albums")
+    problems += standard_checks(record, expect_content="files")
+    if len(record.items) != 2:
+        problems.append(
+            f"views.py:44 _count must coerce a null assetCount; the listing lost "
+            f"{2 - len(record.items)} albums"
+        )
+    for _u, item, _f in record.items:
+        if "None" in item.label2 or "%d" in item.label2:
+            problems.append(f"album label2 is {item.label2!r}")
+
+    h.reset()
+    h.dataset.buckets = [
+        {"timeBucket": "2026-08-01", "count": None},
+        {"timeBucket": "2026-07-01"},
+    ]
+    h.dataset.bucket_sizes = {"2026-08-01": 12, "2026-07-01": 3}
+    record = h.invoke("action=timeline")
+    problems += standard_checks(record, expect_content="files")
+    if len(record.items) != 2:
+        problems.append(
+            f"a null bucket count cost {2 - len(record.items)} months"
+        )
+    return problems
+
+
+# -------------------------------------------------------- slideshow target
+
+
+@case("v2.0.1 slideshow: a foreign target is refused")
+def slideshow_foreign_target(h):
+    from urllib.parse import quote
+
+    h.reset()
+    problems = []
+    for target in ("smb://server/share", "special://home/userdata",
+                   "plugin://plugin.video.other/?action=x", "/etc"):
+        record = h.invoke(
+            f"action=slideshow&target={quote(target, safe='')}", handle=-1
+        )
+        problems += standard_checks(
+            record, expect_directory=False, expect_content=None, allow_dialog=True
+        )
+        if record.builtins:
+            problems.append(
+                f"views.py:429 must refuse a target outside this addon; "
+                f"target={target!r} ran {record.builtins[0]!r} under the addon's "
+                f"own identity"
+            )
+
+    own = "plugin://plugin.video.immich/?action=timeline"
+    record = h.invoke(
+        f"action=slideshow&target={quote(own, safe='')}", handle=-1
+    )
+    problems += standard_checks(
+        record, expect_directory=False, expect_content=None, allow_dialog=True
+    )
+    if len(record.builtins) != 1:
+        problems.append(f"the addon's own target was refused: {record.builtins}")
+    return problems
+
+
+# ------------------------------------------------------- credential gate
+
+
+@case("v2.0.1 credentials: settings and test_connection work before setup")
+def credential_gate(h):
+    problems = []
+    not_configured = STRINGS[30050]
+
+    # test_connection with no key must still run and report the real failure.
+    h.reset(api_key="")
+    record = h.invoke("action=test_connection", handle=-1)
+    problems += standard_checks(
+        record, expect_directory=False, expect_content=None, allow_dialog=True
+    )
+    if record.settings_opened:
+        problems.append(
+            "router.py:120 exempts test_connection from the credential gate, but "
+            "it still forced the settings dialog open"
+        )
+    headings = [d[1] for d in record.dialogs if d[0] == "ok"]
+    if not_configured in headings:
+        problems.append(
+            f"test_connection with a blank key showed 'Not configured' instead of "
+            f"testing: {headings}"
+        )
+    if not headings:
+        problems.append("test_connection reported nothing at all")
+
+    # settings must open the dialog itself, not via the gate.
+    h.reset(immich_url="")
+    record = h.invoke("action=settings")
+    problems += standard_checks(
+        record, expect_succeeded=False, expect_content=None, allow_dialog=True
+    )
+    if record.settings_opened != 1:
+        problems.append(
+            f"action=settings with a blank URL opened the dialog "
+            f"{record.settings_opened} times, expected 1"
+        )
+    if any(d[1] == not_configured for d in record.dialogs if d[0] == "ok"):
+        problems.append("action=settings showed 'Not configured' before opening")
+
+    # Everything else still gates.
+    h.reset(api_key="")
+    record = h.invoke("action=timeline")
+    problems += standard_checks(
+        record, expect_succeeded=False, expect_content=None, allow_dialog=True
+    )
+    if not any(d[1] == not_configured for d in record.dialogs if d[0] == "ok"):
+        problems.append("a listing route no longer gates on missing credentials")
+    return problems
+
+
+# ----------------------------------------------------------- month labels
+
+
+@case("v2.0.1 labels: month names come from Kodi core strings 21-32")
+def month_core_strings(h):
+    h.reset()
+    h.dataset.buckets = [
+        {"timeBucket": "2026-06-01", "count": 3},
+        {"timeBucket": "2025-12-01", "count": 1},
+    ]
+    h.dataset.bucket_sizes = {"2026-06-01": 3, "2025-12-01": 1}
+    record = h.invoke("action=timeline")
+    problems = standard_checks(record, expect_content="files")
+
+    labels = [i.label for _u, i, _f in record.items]
+    if labels != ["June 2026", "December 2025"]:
+        problems.append(
+            f"listing.py:62 should read month names from Kodi core strings "
+            f"20+month, which are translated; got {labels}"
+        )
+    asked = [i for i, _found in record.core_string_requests]
+    if 26 not in asked:
+        problems.append(
+            f"June should resolve through xbmc.getLocalizedString(26); the core "
+            f"strings requested were {asked}"
+        )
+    for string_id in asked:
+        if 30000 <= string_id <= 33999:
+            problems.append(
+                f"xbmc.getLocalizedString({string_id}) is an addon-range id "
+                f"(reference: 30000-30999 plugins, 33000-33999 common); addon "
+                f"strings must go through xbmcaddon.Addon().getLocalizedString"
+            )
+    return problems
+
+
+@case("v2.0.1 labels: no route ever asks Kodi core for an addon string id")
+def no_addon_ids_in_core(h):
+    h.reset()
+    problems = []
+    for query in ("", "action=timeline", "action=bucket&id=2026-08-01",
+                  "action=albums", f"action=album&id={ALBUM_1}", "action=videos",
+                  "action=favourites", "action=people", "action=places",
+                  "action=tags", "action=memories", "action=random",
+                  "action=search"):
+        record = h.invoke(query)
+        for string_id, found in record.core_string_requests:
+            if 30000 <= string_id <= 33999:
+                problems.append(f"{query}: xbmc.getLocalizedString({string_id})")
+            elif not found:
+                problems.append(
+                    f"{query}: xbmc.getLocalizedString({string_id}) is not a "
+                    f"known Kodi core string"
+                )
+    return problems
+
+
+# --------------------------------------------------------------- caching
+
+
+@case("v2.0.1 caching: a successful listing is cached to disc")
+def cache_to_disc(h):
+    h.reset()
+    problems = []
+    for query in ("", "action=timeline", "action=bucket&id=2026-08-01",
+                  "action=albums", "action=people", "action=videos"):
+        record = h.invoke(query)
+        if len(record.end_of_directory) != 1:
+            problems.append(f"{query}: endOfDirectory not called exactly once")
+            continue
+        _handle, succeeded, _update, cache = record.end_of_directory[0]
+        if not succeeded:
+            problems.append(f"{query}: listing failed")
+        elif cache is not True:
+            problems.append(
+                f"router.py:111 endOfDirectory should pass cacheToDisc=True so "
+                f"Back is served from Kodi's cache instead of a round trip; "
+                f"{query} passed {cache!r}"
+            )
+    return problems
+
+
+# ------------------------------------------------------- settings schema
+
+
+@case("v2.0.1 settings: the SSL, timeout and page size options are not hidden")
+def settings_levels(h):
+    problems = []
+    for setting_id in ("ignore_ssl_errors", "timeout", "page_size"):
+        schema = SETTINGS_SCHEMA.get(setting_id)
+        if schema is None:
+            problems.append(f"{setting_id} is not declared in settings.xml")
+            continue
+        if schema["level"] != 0:
+            problems.append(
+                f"resources/settings.xml: {setting_id} is <level>{schema['level']}"
+                f"</level>, so it only appears once the user switches the "
+                f"settings dialog to Advanced; expected 0"
+            )
+    # Nothing else should have regressed to a hidden level either.
+    for setting_id, schema in SETTINGS_SCHEMA.items():
+        if schema["level"] not in (0, 1, 2, 3):
+            problems.append(f"{setting_id} has an invalid level {schema['level']}")
+    return problems
+
+
+# -------------------------------------------------------------- packaging
+
+
+@case("v2.0.1 packaging: nothing reaches the lib modules by their package path")
+def packaging_single_identity(h):
+    """The stronger claim is unachievable, so assert the one that protects us.
+
+    Deleting resources/lib/__init__.py does not give the modules a single
+    import identity: PEP 420 makes `resources.lib` importable as a namespace
+    package whenever the addon root is on sys.path, which Kodi guarantees for a
+    pluginsource addon. Importing that way yields a second module object with
+    its own empty route registry.
+
+    Nothing can prevent that. What matters is that no shipped code takes that
+    path, and that the flat registry dispatch reads is the populated one.
+    """
+    problems = []
+
+    init = os.path.join(LIB, "__init__.py")
+    if os.path.exists(init):
+        problems.append(
+            f"{init} exists, making resources/lib a regular package as well as "
+            f"a namespace one. Nothing needs it."
+        )
+
+    # Parsed, not grepped: prose about the hazard is not the hazard, and the
+    # source documents it deliberately.
+    for path in _lib_sources():
+        tree = ast.parse(open(path, encoding="utf-8").read(), path)
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            for name in names:
+                if name == "resources" or name.startswith("resources."):
+                    problems.append(
+                        f"{path}:{node.lineno}: imports {name!r}. That is a "
+                        f"second module object with an empty route registry; "
+                        f"import the module flat instead."
+                    )
+
+    # And the flat registry, which dispatch actually reads, must be complete.
+    code = (
+        "import sys, json\n"
+        f"sys.path[:0] = [{STUBS!r}, {LIB!r}]\n"
+        "import router, views\n"
+        "print(json.dumps(sorted(router._ROUTES)))"
+    )
+    finished = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+    if finished.returncode != 0:
+        problems.append(f"probe failed: {finished.stderr.strip()}")
+        return problems
+    import json as _json
+
+    registered = _json.loads(finished.stdout.strip().splitlines()[-1])
+    declared = {action for action, _name, _line in discover_routes()}
+    missing = declared - set(registered)
+    if missing:
+        problems.append(f"the flat route registry is missing {sorted(missing)}")
+    return problems
+
+
+# --------------------------------------------------------------- addon.xml
+
+
+@case("v2.0.1 metadata: version, licence and news agree with the tree")
+def addon_metadata(h):
+    import xml.etree.ElementTree as ET
+
+    problems = []
+    root = ET.parse(os.path.join(REPO, "addon.xml")).getroot()
+    version = root.get("version") or ""
+    if version != "2.0.1":
+        problems.append(f"addon.xml version is {version!r}, expected '2.0.1'")
+
+    licence = (root.findtext(".//license") or "").strip()
+    if licence != "GPL-3.0-or-later":
+        problems.append(f"addon.xml licence is {licence!r}")
+    licence_text = open(os.path.join(REPO, "LICENSE.txt"), encoding="utf-8").read()
+    if "GNU GENERAL PUBLIC LICENSE" not in licence_text.upper():
+        problems.append("LICENSE.txt is not the GPL text")
+    if "Version 3" not in licence_text[:400]:
+        problems.append("LICENSE.txt is not GPL version 3")
+    if licence.startswith("GPL-3") and "MIT" in licence:
+        problems.append("licence tag disagrees with LICENSE.txt")
+
+    news = (root.findtext(".//news") or "").strip()
+    if not news.startswith(f"v{version}"):
+        problems.append(
+            f"addon.xml <news> starts with {news.splitlines()[0]!r}, which does "
+            f"not match the version attribute {version!r}"
+        )
+
+    # Kodi reads the addon id from here and keys userdata by it.
+    if root.get("id") != "plugin.video.immich":
+        problems.append(f"the addon id changed to {root.get('id')!r}")
+    return problems

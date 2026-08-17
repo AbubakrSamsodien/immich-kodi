@@ -143,9 +143,27 @@ def sleep(timemillis):
     need_int(timemillis, "xbmc.sleep", "timemillis")
 
 
+# Kodi core strings. 21-32 are the long month names and 51-62 the short forms,
+# verified against addons/resource.language.en_gb/resources/strings.po on
+# master. A stub that returned "" for every id could not tell a correct core
+# string id from a wrong one, so the real values are served here.
+_CORE_STRINGS = {}
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December")
+for _index, _name in enumerate(_MONTHS):
+    _CORE_STRINGS[21 + _index] = _name
+    _CORE_STRINGS[51 + _index] = _name[:3]
+
+
 def getLocalizedString(id):  # noqa: A002
     need_int(id, "xbmc.getLocalizedString", "id")
-    return ""
+    STATE.core_string_requests.append((id, id in _CORE_STRINGS))
+    if 30000 <= id <= 33999:
+        raise ValueError(
+            f"xbmc.getLocalizedString({id}) is for Kodi core strings; addon "
+            f"strings must go through xbmcaddon.Addon().getLocalizedString"
+        )
+    return _CORE_STRINGS.get(id, "")
 
 
 def getInfoLabel(cLine):
