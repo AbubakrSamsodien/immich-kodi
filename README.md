@@ -112,64 +112,62 @@ see `PERF.md`.
 
 A phone video shot in portrait is stored as a landscape frame plus a rotation
 matrix in the container. Browsers apply it, which is why such a video looks
-right in Immich's own web app. Kodi reads it too —
-`CDVDDemuxFFmpeg` pulls `AV_PKT_DATA_DISPLAYMATRIX` into `iOrientation` — and
+right in Immich's own web app. Kodi reads it too — `CDVDDemuxFFmpeg` pulls
+`AV_PKT_DATA_DISPLAYMATRIX` into `iOrientation`, and
 `CBaseRenderer::ReorderDrawPoints()` applies it by rotating the destination
 coordinates.
 
 **But not in every renderer.** `CRendererDRMPRIME` stores `m_renderOrientation`
-and never uses it, and its `Supports()` lists only `STRETCH`, `ZOOM`,
-`VERTICAL_SHIFT` and `PIXEL_RATIO` — no rotation. It renders direct to a display
-plane, bypassing the vertex path entirely. The GLES renderer declares
-`RENDERFEATURE_ROTATION` and does honour it.
+and never uses it; rotation is absent from its `Supports()` list. It renders
+direct to a display plane, bypassing the vertex path. The EGL/GLES renderer
+declares `RENDERFEATURE_ROTATION` and honours it.
 
-LibreELEC on a Raspberry Pi ships `videoplayer.useprimerenderer` defaulting to
-`0` (DIRECT), so rotated video renders sideways and squeezed: the display aspect
-is applied, the rotation is not.
-
-**Fix.** Settings → Player → Videos, with the settings level on **Advanced**:
-set the PRIME renderer option from **DIRECT** to **GLES**. Leave
-`videoplayer.useprimedecoder` on, so hardware decode is retained — it is the
-renderer that matters, not the decoder. Restart playback afterwards; the
-renderer is chosen at configure time.
-
-Turning the *decoder* off also works, because without PRIME buffers Kodi falls
-back to GLES anyway — but it costs all hardware video decode, and on a Pi 5
-HEVC is the only codec that board decodes in hardware. Change the renderer, not
-the decoder.
-
-To check what your box is using:
-
-```sh
-grep -iE 'prime|rendermethod' /storage/.kodi/userdata/guisettings.xml
-```
+LibreELEC on a Raspberry Pi ships `videoplayer.useprimerenderer` at `0`
+(direct to plane), overriding Kodi's own default of `1`. So rotated video renders
+sideways and squeezed: the display aspect is applied, the rotation is not.
 
 **No add-on can fix this.** Rotation lives inside Kodi's render pipeline; no
 plugin API reaches it, and declaring a stream aspect via `addVideoStream` makes
-it worse, because the aspect is already correct and the rotation is what is
-missing.
+it worse, because the aspect is already correct and only the rotation is missing.
 
-### Side effect: Right seeks instead of advancing
+### Fix it in Immich, not in Kodi
 
-With the GLES renderer, a playing video takes focus in the fullscreen video
-window, where Right is bound to seek. The DIRECT renderer composites the video
-beneath the GUI, so the slideshow keeps focus and Right stays "next picture".
+Measured on a Raspberry Pi 5, switching the renderer to EGL fixes rotation and
+costs more than it is worth:
 
-There is no plugin API for window focus or key bindings, so this is not
-something the add-on can change. Let the video finish — the slideshow advances
-by itself — or press Back to return to the slideshow before pressing Right.
+| | direct to plane | EGL |
+| --- | --- | --- |
+| 4K playback | smooth | stutters |
+| Rotated phone video | wrong | correct |
+| Right advances to the next item | yes | no, it seeks |
 
-### If you would rather not change the renderer
+The renderer applies to *all* Kodi playback, so changing it to fix phone videos
+also degrades an unrelated movie library. And under EGL a playing video takes
+focus in the fullscreen video window, where Right is bound to seek; direct to
+plane composites beneath the GUI, leaving the slideshow holding the key.
 
-Make Immich hand Kodi a stream that needs no rotation. In **Administration →
-Settings → Video Transcoding** set **Transcode policy** to **All videos**, raise
-**Target resolution** above the 720p default, and run **Administration → Jobs →
-Video Conversion** for all assets. The default `Required` policy only transcodes
-when the codec falls outside `acceptedVideoCodecs` (H.264 alone by default), so
-an H.264 clip is passed through untouched and both the Transcoded and Original
-options return the same bytes. Immich's software transcode path lets ffmpeg
-autorotate, which bakes the rotation into the output; its hardware paths pass
-`-noautorotate`.
+So leave **PRIME render method** on **direct to plane**, keep the DRM PRIME
+decoder on, and make Immich emit an upright stream instead. In
+**Administration → Settings → Video Transcoding**:
+
+| Setting | Change to | Why |
+| --- | --- | --- |
+| Transcode policy | **All videos** | The default `Required` only transcodes when the codec falls outside `acceptedVideoCodecs`, which is H.264 alone. An H.264 clip is passed through untouched, so the Transcoded and Original options return identical bytes. `Optimal` will not help either for a clip under the target resolution. |
+| Target resolution | 1080p or Original | The default is 720p. |
+| Hardware acceleration | Off, if practical | The software path lets ffmpeg autorotate, baking rotation into the output. `NvencHwDecodeConfig`, `QsvHwDecodeConfig`, `VaapiHwDecodeConfig` and `RkmppHwDecodeConfig` all pass `-noautorotate`. |
+
+Then run **Administration → Jobs → Video Conversion** for all assets. Phone
+clips are small, so this is quick — unlike re-encoding a movie library.
+
+To see what your box is using:
+
+```sh
+grep -iE 'prime' /storage/.kodi/userdata/guisettings.xml
+```
+
+In the Kodi GUI the setting is **Settings → Player → Videos → PRIME render
+method**, at the Advanced settings level, offering **EGL** (`1`) and **direct to
+plane** (`0`).
 
 ## Server compatibility
 
