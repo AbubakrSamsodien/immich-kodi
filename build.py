@@ -18,7 +18,10 @@ DIST = ROOT / "dist"
 
 # Anything matching these is developer scaffolding, not part of the addon.
 EXCLUDED_DIRS = {".git", ".github", "dist", "tests", "tools", "__pycache__", ".idea", ".vscode"}
-EXCLUDED_FILES = {"build.py", "debug.py", "pydevd-pycharm.egg", ".gitignore", ".DS_Store"}
+# PERF.md and the issue template are for contributors, not users. README
+# stays: Kodi shows it in the addon information dialog.
+EXCLUDED_FILES = {"build.py", "debug.py", "pydevd-pycharm.egg", ".gitignore",
+                  ".DS_Store", "PERF.md"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".zip"}
 
 
