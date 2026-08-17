@@ -147,6 +147,15 @@ def _passthrough(request) -> dict:
 
 @route("timeline")
 def timeline(request):
+    # DEPRECATED, advisory, no removal date: `?action=timeline&video=1` was the
+    # Videos entry in 1.0.0 and 2.0.0, so it is saved in users' Kodi favourites
+    # and cannot simply stop working. It is adapted onto the videos route rather
+    # than merely tolerated, because the old implementation listed every
+    # photo-only month with a full asset count and each one opened empty.
+    # Removable once no favourite can plausibly still point here.
+    if request.param("video") == "1":
+        return videos(request)
+
     buckets = request.client.timeline_buckets(**_timeline_filters(request))
     inherited = _passthrough(request)
 

@@ -589,23 +589,78 @@ def route_unknown_action(h):
     return problems
 
 
-@case("route 'timeline' with video=1: videos-only listing")
+@case("deprecated: ?action=timeline&video=1 is adapted onto the videos route")
 def route_videos(h):
+    """The Videos entry in 1.0.0 and 2.0.0, so it lives in saved favourites.
+
+    It must keep working, and it must not keep its old behaviour: it used to
+    list every month with a full asset count, and photo-only months opened
+    empty. Adapted rather than merely tolerated, so an old favourite now gets
+    the same listing as the current menu entry.
+    """
     h.reset()
-    record = h.invoke("action=timeline&video=1")
-    problems = standard_checks(record, expect_content="files")
-    child = None
-    for url, _i, _f in record.items:
-        query = dict(parse_qsl(urlparse(url).query))
-        if query.get("video") != "1":
-            problems.append(f"video flag not inherited by the month link: {url!r}")
-        child = child or url
-    if child:
-        record2 = h.invoke("?" + urlparse(child).query)
-        problems += standard_checks(record2, expect_content="videos")
-        for url, item, _f in record2.items:
-            if "/video/playback" not in url:
-                problems.append(f"videos-only listing contains a still: {url!r}")
+    legacy = h.invoke("action=timeline&video=1")
+    problems = standard_checks(legacy, expect_content="videos")
+
+    h.reset()
+    current = h.invoke("action=videos")
+
+    legacy_urls = [url for url, _i, _f in legacy.items]
+    current_urls = [url for url, _i, _f in current.items]
+    if legacy_urls != current_urls:
+        problems.append(
+            f"the legacy URL and action=videos disagree: "
+            f"{len(legacy_urls)} vs {len(current_urls)} items"
+        )
+    if not legacy_urls:
+        problems.append("the legacy URL now lists nothing")
+    for url in legacy_urls:
+        if "/video/playback" not in url:
+            problems.append(f"a still leaked into the legacy listing: {url!r}")
+    for _url, _item, isfolder in legacy.items:
+        if isfolder:
+            problems.append("the legacy URL still emits month folders")
+
+    # The plain timeline must be untouched by the adapter.
+    h.reset()
+    plain = h.invoke("action=timeline")
+    problems += standard_checks(plain, expect_content="files")
+    if not any(f for _u, _i, f in plain.items):
+        problems.append("the plain timeline stopped emitting month folders")
+    return problems
+
+
+@case("deprecated: no dead code left behind by the 2.0.2 version floor")
+def dead_code(h):
+    """Removals that the Kodi 20 floor and the videos route made unreachable."""
+    problems = []
+    # Parsed, not grepped: the source explains why the old getters are gone,
+    # and naming them in a comment is not calling them.
+    path = os.path.join(LIB, "kodiutils.py")
+    tree = ast.parse(open(path, encoding="utf-8").read(), path)
+    retired = {"getSettingString", "getSettingBool", "getSettingInt"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in retired:
+            problems.append(
+                f"kodiutils.py:{node.lineno} calls {node.attr}; xbmc.python "
+                f"3.0.1 guarantees Settings, so the fallback is unreachable"
+            )
+        if isinstance(node, ast.Attribute) and node.attr == "getSettings":
+            continue
+    names = {
+        t.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for t in node.targets
+        if isinstance(t, ast.Name)
+    }
+    if "ADDON_NAME" in names:
+        problems.append("kodiutils.py still defines ADDON_NAME, which nothing reads")
+    listing = open(os.path.join(LIB, "listing.py"), encoding="utf-8").read()
+    if "_duration_label" in listing:
+        problems.append("listing.py still defines _duration_label, which nothing calls")
+    if os.path.exists(os.path.join(MEDIA_DIR, "slideshow.png")):
+        problems.append("resources/media/slideshow.png ships but nothing references it")
     return problems
 
 

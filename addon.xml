@@ -4,7 +4,7 @@
   would orphan every existing user's settings on upgrade.
 -->
 <addon id="plugin.video.immich"
-       version="2.0.2"
+       version="2.0.3"
        name="Immich"
        provider-name="Immich Kodi contributors">
     <requires>
@@ -39,9 +39,9 @@
             <fanart>resources/fanart.jpg</fanart>
         </assets>
         <news>
-v2.0.2
-- Declares Kodi 20 as the minimum. The previous manifest let Kodi 19 install the addon, which then failed on the first listing.
-- Slideshow arguments now follow the documented order for the builtin.
+v2.0.3
+- Old "Videos" favourites saved from 1.0.0 or 2.0.0 now open the real video list, instead of months that were mostly empty.
+- Removed code left unreachable by the Kodi 20 requirement.
 </news>
     </extension>
 </addon>

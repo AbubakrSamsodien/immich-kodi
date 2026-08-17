@@ -128,11 +128,6 @@ GLYPHS = {
         <path d="M176 78 L200 96 L176 114 Z" fill="#fff"/>
         <path d="M176 142 L200 160 L176 178 Z" fill="#fff"/>'''),
 
-    "slideshow": ("purple", '''
-        <rect x="78" y="50" width="140" height="98" rx="14" fill="#fff" opacity="0.45"/>
-        <rect x="52" y="84" width="152" height="118" rx="16" fill="#fff"/>
-        <path d="M110 116 L156 143 L110 170 Z" fill="#8E44AD"/>'''),
-
     "settings": ("slate", f'''
         <path d="{gear_path()}" fill="#fff"/>
         <circle cx="128" cy="128" r="30" fill="#55607A"/>'''),

@@ -16,7 +16,6 @@ import xbmcvfs
 
 ADDON = xbmcaddon.Addon()
 ADDON_ID = ADDON.getAddonInfo("id")
-ADDON_NAME = ADDON.getAddonInfo("name")
 ADDON_PATH = xbmcvfs.translatePath(ADDON.getAddonInfo("path"))
 ADDON_ICON = os.path.join(ADDON_PATH, "resources", "icon.png")
 ADDON_FANART = os.path.join(ADDON_PATH, "resources", "fanart.jpg")
@@ -85,36 +84,27 @@ class Settings:
     """
 
     def __init__(self):
-        addon = xbmcaddon.Addon()
-        # xbmcaddon.Settings is the v20+ API; Addon().getSettingString and
-        # friends are deprecated. Fall back for older Kodi builds.
-        self._settings = addon.getSettings() if hasattr(addon, "getSettings") else None
-        self._addon = addon
+        # addon.xml requires xbmc.python 3.0.1, which is Kodi 20, so getSettings
+        # is always present. Addon().getSettingString and friends are deprecated
+        # in favour of it.
+        self._settings = xbmcaddon.Addon().getSettings()
 
     def _string(self, key: str, default: str = "") -> str:
         try:
-            value = (
-                self._settings.getString(key)
-                if self._settings is not None
-                else self._addon.getSettingString(key)
-            )
+            value = self._settings.getString(key)
         except (TypeError, ValueError, RuntimeError):
             return default
         return value if value else default
 
     def _bool(self, key: str, default: bool = False) -> bool:
         try:
-            if self._settings is not None:
-                return bool(self._settings.getBool(key))
-            return bool(self._addon.getSettingBool(key))
+            return bool(self._settings.getBool(key))
         except (TypeError, ValueError, RuntimeError):
             return default
 
     def _int(self, key: str, default: int = 0) -> int:
         try:
-            if self._settings is not None:
-                return int(self._settings.getInt(key))
-            return int(self._addon.getSettingInt(key))
+            return int(self._settings.getInt(key))
         except (TypeError, ValueError, RuntimeError):
             return default
 

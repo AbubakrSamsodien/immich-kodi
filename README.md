@@ -97,6 +97,39 @@ Kodi matches saved settings by id. Renaming one silently discards the user's
 value on upgrade and substitutes the new default. Add settings freely, but do
 not rename `immich_url`, `api_key`, `shared_only` or `asset_name`.
 
+## Deprecations
+
+### `?action=timeline&video=1`
+
+**Status:** Deprecated (advisory) as of 2.0.3
+**Replacement:** `?action=videos`
+**Removal:** No date. It costs two lines and old favourites are impossible to
+count from here.
+**Reason:** The timeline endpoints take no asset-type filter, so this URL built
+month folders from every month in the library. Photo-only months were listed
+with a full asset count and opened empty.
+
+This was the Videos menu entry in 1.0.0 and 2.0.0, so it is saved in users'
+Kodi favourites and bookmarks. It is adapted onto the `videos` route rather
+than merely tolerated: the old URL now returns exactly what the current menu
+entry returns.
+
+No action is needed. If you saved a favourite, re-save it against `Videos` in
+the menu to drop the legacy path.
+
+`?action=bucket&...&video=1` is unaffected and still filters a single month to
+videos.
+
+### Removed in 2.0.3
+
+Unreachable once `addon.xml` began requiring `xbmc.python` 3.0.1 (Kodi 20),
+where `Addon().getSettings()` is always present:
+
+- the `getSettingString` / `getSettingBool` / `getSettingInt` fallback
+- `kodiutils.ADDON_NAME`, `listing._duration_label`, `resources/media/slideshow.png`
+
+A test asserts each stays gone, so the fallback cannot creep back.
+
 ## Licence
 
 GPL-3.0-or-later. See `LICENSE.txt`.

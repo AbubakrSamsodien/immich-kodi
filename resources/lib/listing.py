@@ -72,17 +72,6 @@ def _kodi_datetime(value: Optional[datetime]) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S") if value else ""
 
 
-def _duration_label(seconds: Optional[float]) -> str:
-    if not seconds:
-        return ""
-    total = int(seconds)
-    hours, remainder = divmod(total, 3600)
-    minutes, secs = divmod(remainder, 60)
-    if hours:
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{minutes}:{secs:02d}"
-
-
 def menu_item(
     label: str, icon_name: str, description: str = "", is_folder: bool = True
 ) -> xbmcgui.ListItem:
